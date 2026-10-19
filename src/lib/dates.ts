@@ -54,3 +54,16 @@ export function haceCuanto(iso: string, ahora: Date = new Date()): string {
 export function formatDias(dias: DiaSemana[]): string {
   return ORDEN_SEMANA.filter((d) => dias.includes(d)).map((d) => DIAS_CORTOS[d]).join(', ');
 }
+
+/** "hoy", "mañana", "el jueves 22/10" */
+export function cuandoEs(fecha: Date, ahora: Date = new Date()): string {
+  const n = diffDays(ahora, fecha);
+  if (n === 0) return 'hoy';
+  if (n === 1) return 'mañana';
+  return `el ${DIAS_LARGOS[fecha.getDay()]} ${formatFechaCorta(isoDate(fecha))}`;
+}
+
+/** "pasa hoy", "pasa mañana", "pasa el jueves 22/10" */
+export function textoVisita(fecha: Date, ahora: Date = new Date()): string {
+  return `pasa ${cuandoEs(fecha, ahora)}`;
+}

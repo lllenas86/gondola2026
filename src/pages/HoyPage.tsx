@@ -1,103 +1,258 @@
-import { useMemo } from 'react';
 import { useStore } from '../state/store';
-import { addDays, DIAS_LARGOS, formatFechaCorta, haceCuanto, startOfDay } from '../lib/dates';
-import { calcularStock, diasParaVencer, productosDeProveedor, proximaVisita, visitaEl, DIAS_SIN_CONTEO } from '../lib/stock';
+import { cuandoEs, DIAS_LARGOS, formatFechaCorta, haceCuanto, parseIsoDate, startOfDay, textoVisita } from '../lib/dates';
+import { calcularStock, diasParaVencer, productosDeProveedor, proveedoresDeProducto, proximaVisita, DIAS_SIN_CONTEO } from '../lib/stock';
 import { irA } from '../lib/router';
 import { Icon } from '../components/Icon';
-import { Vacio } from '../components/ui';
-import type { AppData, Producto, Proveedor } from '../types';
+import { EstadoConexion, Vacio } from '../components/ui';
+import type { AppData, FilaStock, Producto, Proveedor } from '../types';
+
+// Pantalla de inicio. De arriba hacia abajo:
+//   1. Te falta pedir            ← SIEMPRE visible, cualquier día (v_stock_actual.bajo_punto_pedido)
+//   2. Pasan hoy y mañana        ← v_visitas_proximas
+//   3. Por vencer                ← v_vencimientos (7 días)
+//   4. Sin contar hace +7 días   ← v_stock_actual.conteo_desactualizado
+
+const TODOS = '__todos__';
+
+interface Visita {
+  proveedor: Proveedor;
+  fecha: Date;
+}
+
+interface ItemFalta {
+  producto: Producto;
+  fila: FilaStock;
+  /** Otros proveedores que también lo traen, con su próxima visita */
+  otros: Visita[];
+}
+
+interface GrupoFalta {
+  /** null = el producto no tiene proveedor asignado */
+  visita: Visita | null;
+  items: ItemFalta[];
+}
+
+/** Agrupa lo que falta pedir por el proveedor que pasa antes (hoy cuenta). */
+function armarFaltantes(data: AppData, filas: FilaStock[], hoy: Date): GrupoFalta[] {
+  const grupos = new Map<string, GrupoFalta>();
+  for (const fila of filas) {
+    if (!fila.bajoPuntoPedido) continue;
+    const producto = data.productos.find((p) => p.id === fila.productoId);
+    if (!producto) continue;
+    const visitas: Visita[] = proveedoresDeProducto(data, producto.id)
+      .map((proveedor) => ({ proveedor, fecha: proximaVisita(proveedor, hoy) }))
+      .filter((v): v is Visita => v.fecha !== null)
+      .sort((a, b) => a.fecha.getTime() - b.fecha.getTime() || a.proveedor.nombre.localeCompare(b.proveedor.nombre, 'es'));
+    const [primera, ...otros] = visitas;
+    const clave = primera ? primera.proveedor.id : '__sin__';
+    const grupo = grupos.get(clave) ?? { visita: primera ?? null, items: [] };
+    grupo.items.push({ producto, fila, otros });
+    grupos.set(clave, grupo);
+  }
+  return [...grupos.values()]
+    .map((g) => ({ ...g, items: g.items.sort((a, b) => a.producto.nombre.localeCompare(b.producto.nombre, 'es')) }))
+    .sort((a, b) => {
+      if (!a.visita) return 1;
+      if (!b.visita) return -1;
+      return a.visita.fecha.getTime() - b.visita.fecha.getTime() || a.visita.proveedor.nombre.localeCompare(b.visita.proveedor.nombre, 'es');
+    });
+}
 
 export function HoyPage() {
-  const { data } = useStore();
+  const { data, vistas } = useStore();
   const ahora = new Date();
   const hoy = startOfDay(ahora);
-  const manana = addDays(hoy, 1);
 
-  const deHoy = data.proveedores.filter((p) => visitaEl(p, hoy));
-  const deManana = data.proveedores.filter((p) => visitaEl(p, manana) && !deHoy.includes(p));
+  const faltantes = armarFaltantes(data, vistas.stock, hoy);
+  const cantidadFalta = faltantes.reduce((a, g) => a + g.items.length, 0);
 
-  const resumen = useMemo(() => {
-    const ids = new Set<string>();
-    for (const p of [...deHoy, ...deManana]) productosDeProveedor(data, p.id).forEach((x) => ids.add(x.id));
-    let pedir = 0;
-    let sinContar = 0;
-    for (const id of ids) {
-      const prod = data.productos.find((p) => p.id === id);
-      if (!prod) continue;
-      const s = calcularStock(data, prod, ahora);
-      if (s.bajoPuntoDePedido) pedir++;
-      if (s.sinConteoReciente) sinContar++;
-    }
-    return { pedir, sinContar };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  const pasan = vistas.visitas
+    .filter((v) => v.diasHasta <= 1)
+    .map((v) => ({ fila: v, proveedor: data.proveedores.find((p) => p.id === v.proveedorId) }))
+    .filter((x): x is { fila: typeof x.fila; proveedor: Proveedor } => !!x.proveedor);
+
+  const sinContar = vistas.stock
+    .filter((s) => s.conteoDesactualizado)
+    .sort((a, b) => (b.diasDesdeConteo ?? Infinity) - (a.diasDesdeConteo ?? Infinity) || a.nombre.localeCompare(b.nombre, 'es'));
 
   const nombreDia = DIAS_LARGOS[hoy.getDay()];
 
   return (
     <>
       <header className="cabecera">
+        <EstadoConexion />
         <p className="cabecera-marca">Góndola</p>
         <h1>
           {nombreDia.charAt(0).toUpperCase() + nombreDia.slice(1)} {formatFechaCorta(ahora.toISOString())}
         </h1>
-        {(deHoy.length > 0 || deManana.length > 0) && (
-          <div className="resumen">
-            <span className={resumen.pedir > 0 ? 'resumen-item rojo' : 'resumen-item'}>
-              <strong>{resumen.pedir}</strong> para pedir
-            </span>
-            <span className={resumen.sinContar > 0 ? 'resumen-item ambar' : 'resumen-item'}>
-              <strong>{resumen.sinContar}</strong> sin contar hace más de {DIAS_SIN_CONTEO} días
-            </span>
-          </div>
-        )}
+        <div className="resumen">
+          <span className={cantidadFalta > 0 ? 'resumen-item rojo' : 'resumen-item'}>
+            <strong>{cantidadFalta}</strong> para pedir
+          </span>
+          <span className={sinContar.length > 0 ? 'resumen-item ambar' : 'resumen-item'}>
+            <strong>{sinContar.length}</strong> sin contar hace más de {DIAS_SIN_CONTEO} días
+          </span>
+        </div>
       </header>
 
-      <Bloque titulo="Pasan hoy" proveedores={deHoy} data={data} ahora={ahora} dia={hoy} />
-      <Bloque titulo="Pasan mañana" proveedores={deManana} data={data} ahora={ahora} dia={manana} />
+      {/* 1. Te falta pedir: siempre visible */}
+      <section className="seccion" aria-labelledby="titulo-falta">
+        <h2 className="seccion-titulo" id="titulo-falta">Te falta pedir</h2>
+        {faltantes.length === 0 ? (
+          <TodoEnOrden />
+        ) : (
+          faltantes.map((g) => <TarjetaFalta key={g.visita?.proveedor.id ?? 'sin'} grupo={g} ahora={ahora} />)
+        )}
+      </section>
+
+      {/* 2. Pasan hoy y mañana */}
+      <section className="seccion" aria-labelledby="titulo-pasan">
+        <h2 className="seccion-titulo" id="titulo-pasan">Pasan hoy y mañana</h2>
+        {pasan.length === 0 ? (
+          <Vacio titulo="No pasa ningún proveedor hoy ni mañana.">
+            <ProximaVisita />
+          </Vacio>
+        ) : (
+          pasan.map(({ fila, proveedor }) => (
+            <TarjetaProveedor key={proveedor.id} proveedor={proveedor} cuando={fila.diasHasta === 0 ? 'Pasa hoy' : 'Pasa mañana'} data={data} ahora={ahora} />
+          ))
+        )}
+      </section>
+
+      {/* 3. Por vencer (7 días) */}
+      <section className="seccion" aria-labelledby="titulo-vencer">
+        <h2 className="seccion-titulo" id="titulo-vencer">Por vencer</h2>
+        {vistas.vencimientos.length === 0 ? (
+          <p className="texto-suave nota-seccion">Nada vence en los próximos 7 días.</p>
+        ) : (
+          <ul className="lista-simple">
+            {vistas.vencimientos.map((v) => (
+              <li key={`${v.productoId}-${v.fechaVencimiento}`} className="item-simple">
+                <div>
+                  <p className="item-titulo">{v.nombre}</p>
+                  <p className="texto-suave">{v.cantidad} u. · vence el {formatFechaCorta(v.fechaVencimiento)}</p>
+                </div>
+                <span className={`etiqueta ${v.diasParaVencer <= 3 ? 'etiqueta-violeta' : 'etiqueta-gris'}`}>
+                  <Icon name="hoja" size={13} /> {v.diasParaVencer === 0 ? 'Vence hoy' : v.diasParaVencer === 1 ? 'Vence mañana' : `En ${v.diasParaVencer} días`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* 4. Sin contar hace +7 días */}
+      <section className="seccion" aria-labelledby="titulo-sin-contar">
+        <h2 className="seccion-titulo" id="titulo-sin-contar">Sin contar hace +{DIAS_SIN_CONTEO} días</h2>
+        {sinContar.length === 0 ? (
+          <p className="texto-suave nota-seccion">Todos los productos se contaron en la última semana.</p>
+        ) : (
+          <ul className="lista-simple">
+            {sinContar.map((s) => {
+              const prov = proveedoresDeProducto(data, s.productoId)[0];
+              return (
+                <li key={s.productoId} className="item-simple">
+                  <div>
+                    <p className="item-titulo">{s.nombre}</p>
+                    <p className="texto-suave">
+                      {s.fechaUltimoConteo ? `Contado ${haceCuanto(s.fechaUltimoConteo, ahora)} (${formatFechaCorta(s.fechaUltimoConteo)})` : 'Nunca se contó'}
+                    </p>
+                  </div>
+                  <button type="button" className="btn btn-secundario btn-chico" onClick={() => irA('contar', { proveedor: prov?.id ?? TODOS })}>
+                    Contar
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
     </>
   );
 }
 
-function Bloque({ titulo, proveedores, data, ahora, dia }: { titulo: string; proveedores: Proveedor[]; data: AppData; ahora: Date; dia: Date }) {
+/** Nunca pantalla vacía: si no falta nada, se dice y se muestra la próxima visita. */
+function TodoEnOrden() {
   return (
-    <section className="seccion">
-      <h2 className="seccion-titulo">{titulo}</h2>
-      {proveedores.length === 0 ? (
-        <Vacio titulo={`No pasa ningún proveedor ${titulo.endsWith('hoy') ? 'hoy' : 'mañana'}.`}>
-          <ProximaVisita data={data} desde={addDays(dia, 1)} />
-        </Vacio>
-      ) : (
-        proveedores.map((p) => <TarjetaProveedor key={p.id} proveedor={p} data={data} ahora={ahora} />)
-      )}
-    </section>
+    <div className="tarjeta tarjeta-ok">
+      <p className="todo-ok">
+        <strong>Todo en orden ✓</strong>
+      </p>
+      <ProximaVisita />
+    </div>
   );
 }
 
-function ProximaVisita({ data, desde }: { data: AppData; desde: Date }) {
-  let mejor: { fecha: Date; nombres: string[] } | null = null;
-  for (const p of data.proveedores) {
-    const f = proximaVisita(p, desde);
-    if (!f) continue;
-    if (!mejor || f < mejor.fecha) mejor = { fecha: f, nombres: [p.nombre] };
-    else if (f.getTime() === mejor.fecha.getTime()) mejor.nombres.push(p.nombre);
-  }
-  if (!mejor) return null;
+function ProximaVisita() {
+  const { vistas } = useStore();
+  if (vistas.visitas.length === 0) return <p className="texto-suave">No hay proveedores con días de visita cargados.</p>;
+  const min = Math.min(...vistas.visitas.map((v) => v.diasHasta));
+  const proximas = vistas.visitas.filter((v) => v.diasHasta === min);
+  const fecha = parseIsoDate(proximas[0].proximaVisita);
   return (
     <p className="texto-suave">
-      Próxima visita: {DIAS_LARGOS[mejor.fecha.getDay()]} — {mejor.nombres.join(', ')}.
+      Próxima visita: {proximas.map((v) => v.nombre).join(', ')}, {cuandoEs(fecha)}
     </p>
   );
 }
 
-function TarjetaProveedor({ proveedor, data, ahora }: { proveedor: Proveedor; data: AppData; ahora: Date }) {
+function TarjetaFalta({ grupo, ahora }: { grupo: GrupoFalta; ahora: Date }) {
+  const { visita } = grupo;
+  return (
+    <article className="tarjeta tarjeta-falta">
+      <div className="tarjeta-cabecera">
+        <div>
+          <h3>{visita ? `Lo trae ${visita.proveedor.nombre}` : 'Sin proveedor asignado'}</h3>
+          <p className={visita && cuandoEs(visita.fecha, ahora) === 'hoy' ? 'texto-visita hoy' : 'texto-visita'}>
+            {visita ? textoVisita(visita.fecha, ahora) : 'Asignale un proveedor en Catálogo para saber cuándo pedirlo.'}
+          </p>
+        </div>
+        <Icon name="camion" className="icono-suave" />
+      </div>
+      <ul className="lista-stock">
+        {grupo.items.map(({ producto, fila, otros }) => (
+          <li key={producto.id} className="fila-stock bajo">
+            <div className="fila-stock-info">
+              <p className="fila-stock-nombre">{producto.nombre}</p>
+              <p className="texto-suave">
+                Stock {fila.stockActual ?? '—'} / punto de pedido {fila.puntoPedido}
+              </p>
+              {otros.length > 0 && (
+                <p className="texto-suave">
+                  También lo trae {otros.map((o) => `${o.proveedor.nombre} (${textoVisita(o.fecha, ahora)})`).join(', ')}
+                </p>
+              )}
+            </div>
+            <div className="fila-stock-numero" aria-label={`Stock ${fila.stockActual ?? 'sin datos'} de ${fila.puntoPedido}`}>
+              <strong>{fila.stockActual ?? '—'}</strong>
+              <span>/ {fila.puntoPedido}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {visita ? (
+        <button type="button" className="btn btn-primario btn-bloque" onClick={() => irA('contar', { proveedor: visita.proveedor.id })}>
+          <Icon name="contar" /> Contar productos de este proveedor
+        </button>
+      ) : (
+        <button type="button" className="btn btn-secundario btn-bloque" onClick={() => irA('catalogo')}>
+          Asignar proveedor en Catálogo
+        </button>
+      )}
+    </article>
+  );
+}
+
+function TarjetaProveedor({ proveedor, cuando, data, ahora }: { proveedor: Proveedor; cuando: string; data: AppData; ahora: Date }) {
   const productos = productosDeProveedor(data, proveedor.id);
   return (
     <article className="tarjeta">
       <div className="tarjeta-cabecera">
         <div>
           <h3>{proveedor.nombre}</h3>
-          <p className="texto-suave">{productos.length} {productos.length === 1 ? 'producto' : 'productos'}</p>
+          <p className="texto-suave">
+            {cuando} · {productos.length} {productos.length === 1 ? 'producto' : 'productos'}
+          </p>
         </div>
         <Icon name="camion" className="icono-suave" />
       </div>
@@ -106,7 +261,7 @@ function TarjetaProveedor({ proveedor, data, ahora }: { proveedor: Proveedor; da
       ) : (
         <ul className="lista-stock">
           {productos.map((prod) => (
-            <FilaStock key={prod.id} producto={prod} data={data} ahora={ahora} />
+            <FilaStockProducto key={prod.id} producto={prod} data={data} ahora={ahora} />
           ))}
         </ul>
       )}
@@ -117,11 +272,18 @@ function TarjetaProveedor({ proveedor, data, ahora }: { proveedor: Proveedor; da
   );
 }
 
-function FilaStock({ producto, data, ahora }: { producto: Producto; data: AppData; ahora: Date }) {
+function FilaStockProducto({ producto, data, ahora }: { producto: Producto; data: AppData; ahora: Date }) {
+  const { vistas } = useStore();
   const s = calcularStock(data, producto, ahora);
+  const fila = vistas.stock.find((f) => f.productoId === producto.id);
+  // El stock y las marcas salen de la vista v_stock_actual; el detalle del último conteo, del historial.
+  const stock = fila ? fila.stockActual : s.stock;
+  const bajo = fila ? fila.bajoPuntoPedido : s.bajoPuntoDePedido;
+  const desactualizado = fila ? fila.conteoDesactualizado : s.sinConteoReciente;
+  const dias = fila ? fila.diasDesdeConteo : s.diasDesdeConteo;
   const vence = s.proximoVencimiento ? diasParaVencer(s.proximoVencimiento, ahora) : null;
   return (
-    <li className={`fila-stock${s.bajoPuntoDePedido ? ' bajo' : ''}`}>
+    <li className={`fila-stock${bajo ? ' bajo' : ''}`}>
       <div className="fila-stock-info">
         <p className="fila-stock-nombre">{producto.nombre}</p>
         <p className="texto-suave">
@@ -131,22 +293,22 @@ function FilaStock({ producto, data, ahora }: { producto: Producto; data: AppDat
           {s.recibidoDespues > 0 && ` · +${s.recibidoDespues} recibidos`}
         </p>
         <div className="etiquetas">
-          {s.bajoPuntoDePedido && <span className="etiqueta etiqueta-rojo">Pedir · punto {producto.puntoDePedido}</span>}
-          {s.sinConteoReciente && (
+          {bajo && <span className="etiqueta etiqueta-rojo">Pedir · punto {producto.puntoDePedido}</span>}
+          {desactualizado && (
             <span className="etiqueta etiqueta-ambar">
-              <Icon name="reloj" size={13} /> {s.diasDesdeConteo === null ? 'Sin conteo' : `Sin contar hace ${s.diasDesdeConteo} días`}
+              <Icon name="reloj" size={13} /> {dias === null ? 'Sin conteo' : `Sin contar hace ${dias} días`}
             </span>
           )}
-          {vence !== null && (
+          {vence !== null && vence <= 7 && (
             <span className={`etiqueta ${vence <= 3 ? 'etiqueta-violeta' : 'etiqueta-gris'}`}>
               <Icon name="hoja" size={13} /> {vence === 0 ? 'Vence hoy' : vence === 1 ? 'Vence mañana' : `Vence en ${vence} días`}
             </span>
           )}
         </div>
       </div>
-      <div className="fila-stock-numero" aria-label={`Stock ${s.stock ?? 'sin datos'}`}>
-        <strong>{s.stock ?? '—'}</strong>
-        <span>{s.stock === null ? '' : producto.unidad === 'unidad' ? 'u.' : producto.unidad}</span>
+      <div className="fila-stock-numero" aria-label={`Stock ${stock ?? 'sin datos'}`}>
+        <strong>{stock ?? '—'}</strong>
+        <span>{stock === null ? '' : producto.unidad === 'unidad' ? 'u.' : producto.unidad}</span>
       </div>
     </li>
   );

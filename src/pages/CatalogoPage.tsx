@@ -4,7 +4,7 @@ import { formatDias } from '../lib/dates';
 import { productosDeProveedor, proveedoresDeProducto } from '../lib/stock';
 import { irA } from '../lib/router';
 import { Icon } from '../components/Icon';
-import { Vacio } from '../components/ui';
+import { EstadoConexion, Vacio } from '../components/ui';
 import { ProductoForm } from '../features/ProductoForm';
 import { ProveedorForm } from '../features/ProveedorForm';
 import type { Producto, Proveedor } from '../types';
@@ -12,7 +12,7 @@ import type { Producto, Proveedor } from '../types';
 type Pestana = 'productos' | 'proveedores';
 
 export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
-  const { data, restablecer, avisar } = useStore();
+  const { data } = useStore();
   const pestana = pestanaInicial;
   const [editandoProducto, setEditandoProducto] = useState<Producto | 'nuevo' | null>(null);
   const [editandoProveedor, setEditandoProveedor] = useState<Proveedor | 'nuevo' | null>(null);
@@ -26,16 +26,10 @@ export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
     .filter((p) => !q || p.nombre.toLowerCase().includes(q))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 
-  const onRestablecer = () => {
-    if (window.confirm('¿Restablecer los datos de ejemplo? Se borran todos los conteos, recepciones y cambios del catálogo de este navegador.')) {
-      restablecer();
-      avisar('Se restablecieron los datos de ejemplo.', 'info');
-    }
-  };
-
   return (
     <>
       <header className="cabecera">
+        <EstadoConexion />
         <p className="cabecera-marca">Catálogo</p>
         <h1>{pestana === 'productos' ? 'Productos' : 'Proveedores'}</h1>
       </header>
@@ -112,8 +106,9 @@ export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
         </ul>
       )}
 
-      <div className="pie-catalogo">
-        <button type="button" className="btn-link" onClick={onRestablecer}>Restablecer datos de ejemplo</button>
+      <div className="pie-catalogo aviso-nube">
+        <Icon name="check" size={18} />
+        <p>Tus datos se guardan en la nube (Supabase). Podés usar la app desde más de un celular.</p>
       </div>
 
       {editandoProducto && (

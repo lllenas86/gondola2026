@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { TEXTO_SIN_CONEXION } from '../lib/errores';
 import type { DiaSemana } from '../types';
 import { DIAS_CORTOS, ORDEN_SEMANA } from '../lib/dates';
 import { Icon } from './Icon';
@@ -73,6 +74,43 @@ export function Avisos() {
           <span>{a.texto}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Indicador chico de conexión para el encabezado: verde = conectado, gris = sin conexión. */
+export function EstadoConexion() {
+  const { conexion } = useStore();
+  const texto = conexion === 'conectado' ? 'En la nube' : conexion === 'cargando' ? 'Conectando…' : 'Sin conexión';
+  return (
+    <span className={`estado-conexion ${conexion}`} role="status" title={texto}>
+      <span className="estado-conexion-punto" aria-hidden="true" />
+      {texto}
+    </span>
+  );
+}
+
+/** Aviso visible cuando no hay conexión con la base. */
+export function BannerConexion() {
+  const { conexion, cargado, recargar } = useStore();
+  const [reintentando, setReintentando] = useState(false);
+  if (conexion !== 'sin_conexion' || !cargado) return null;
+  return (
+    <div className="banner-conexion" role="alert">
+      <Icon name="alerta" size={18} />
+      <span>{TEXTO_SIN_CONEXION}</span>
+      <button
+        type="button"
+        className="btn-link"
+        disabled={reintentando}
+        onClick={async () => {
+          setReintentando(true);
+          await recargar();
+          setReintentando(false);
+        }}
+      >
+        {reintentando ? 'Probando…' : 'Reintentar'}
+      </button>
     </div>
   );
 }

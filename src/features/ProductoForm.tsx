@@ -2,6 +2,7 @@ import { useCallback, useState, type FormEvent } from 'react';
 import { useStore } from '../state/store';
 import { validarProducto, leerNumero, type Errores } from '../lib/validation';
 import { proveedoresDeProducto } from '../lib/stock';
+import { guardarProducto } from '../lib/datos';
 import { Campo, Hoja } from '../components/ui';
 import type { Producto, Unidad } from '../types';
 
@@ -22,7 +23,7 @@ interface Props {
 }
 
 export function ProductoForm({ producto, nombreInicial = '', proveedorIdsIniciales = [], onCerrar, onGuardado }: Props) {
-  const { data, dispatch, avisar, nuevoId } = useStore();
+  const { data, ejecutar, avisar, nuevoId } = useStore();
   const [nombre, setNombre] = useState(producto?.nombre ?? nombreInicial);
   const [unidad, setUnidad] = useState<Unidad>(producto?.unidad ?? 'unidad');
   const [perecedero, setPerecedero] = useState(producto?.perecedero ?? false);
@@ -31,11 +32,13 @@ export function ProductoForm({ producto, nombreInicial = '', proveedorIdsInicial
     producto ? proveedoresDeProducto(data, producto.id).map((p) => p.id) : proveedorIdsIniciales,
   );
   const [errores, setErrores] = useState<Errores>({});
+  const [guardando, setGuardando] = useState(false);
 
   const cerrar = useCallback(() => onCerrar(), [onCerrar]);
 
-  const guardar = (e: FormEvent) => {
+  const guardar = async (e: FormEvent) => {
     e.preventDefault();
+    if (guardando) return;
     const err = validarProducto({ nombre, puntoDePedido });
     const nombreLimpio = nombre.trim();
     if (!err.nombre && data.productos.some((p) => p.id !== producto?.id && p.nombre.trim().toLowerCase() === nombreLimpio.toLowerCase())) {
@@ -50,9 +53,16 @@ export function ProductoForm({ producto, nombreInicial = '', proveedorIdsInicial
       perecedero,
       puntoDePedido: leerNumero(puntoDePedido) as number,
     };
-    dispatch({ type: 'guardarProducto', producto: guardado, proveedorIds });
+    setGuardando(true);
+    const r = await ejecutar(() => guardarProducto(guardado, !producto, proveedorIds));
+    setGuardando(false);
+    if (!r.ok) {
+      // La base rechazó (o no hay conexión): se muestra el motivo en el formulario
+      setErrores(r.error.campo === 'nombre' || r.error.campo === 'puntoDePedido' ? { [r.error.campo]: r.error.texto } : { general: r.error.texto });
+      return;
+    }
     avisar(producto ? 'Producto actualizado.' : 'Producto creado.');
-    onGuardado?.(guardado);
+    onGuardado?.(r.valor);
     onCerrar();
   };
 
@@ -61,12 +71,13 @@ export function ProductoForm({ producto, nombreInicial = '', proveedorIdsInicial
       titulo={producto ? 'Editar producto' : 'Nuevo producto'}
       onCerrar={cerrar}
       pie={
-        <button type="submit" form="form-producto" className="btn btn-primario btn-bloque btn-grande">
-          {producto ? 'Guardar cambios' : 'Crear producto'}
+        <button type="submit" form="form-producto" className="btn btn-primario btn-bloque btn-grande" disabled={guardando}>
+          {guardando ? 'Guardando…' : producto ? 'Guardar cambios' : 'Crear producto'}
         </button>
       }
     >
       <form id="form-producto" onSubmit={guardar} noValidate>
+        {errores.general && <p className="form-error" role="alert">{errores.general}</p>}
         <Campo etiqueta="Nombre" error={errores.nombre} htmlFor="prod-nombre">
           <input id="prod-nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej.: Fideos tirabuzón 500 g" autoComplete="off" />
         </Campo>

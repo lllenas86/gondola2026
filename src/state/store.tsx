@@ -1,51 +1,16 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
-import type { AppData, Conteo, Producto, Proveedor, Recepcion } from '../types';
-import { cargarDatos, guardarDatos, nuevoId } from '../lib/storage';
-import { crearDatosDeEjemplo } from '../lib/seed';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { AppData, Vistas } from '../types';
+import { nuevoId } from '../lib/storage';
+import { cargarTodo } from '../lib/datos';
+import { mensajeError, type MensajeError } from '../lib/errores';
 
-type Accion =
-  | { type: 'guardarProducto'; producto: Producto; proveedorIds?: string[] }
-  | { type: 'guardarProveedor'; proveedor: Proveedor; productoIds: string[] }
-  | { type: 'registrarConteos'; conteos: Conteo[] }
-  | { type: 'registrarRecepcion'; recepcion: Recepcion }
-  | { type: 'restablecer'; data: AppData };
+// Estado global. Supabase es la única fuente de datos: no hay copia en el navegador.
+// Después de cada cambio se vuelve a leer la base, así todas las pantallas
+// (por ejemplo, Hoy después de guardar un conteo) se actualizan sin recargar.
 
-function reducer(state: AppData, a: Accion): AppData {
-  switch (a.type) {
-    case 'guardarProducto': {
-      const existe = state.productos.some((p) => p.id === a.producto.id);
-      const productos = existe
-        ? state.productos.map((p) => (p.id === a.producto.id ? a.producto : p))
-        : [...state.productos, a.producto];
-      let productoProveedor = state.productoProveedor;
-      if (a.proveedorIds) {
-        productoProveedor = [
-          ...productoProveedor.filter((pp) => pp.productoId !== a.producto.id),
-          ...a.proveedorIds.map((proveedorId) => ({ proveedorId, productoId: a.producto.id })),
-        ];
-      }
-      return { ...state, productos, productoProveedor };
-    }
-    case 'guardarProveedor': {
-      const existe = state.proveedores.some((p) => p.id === a.proveedor.id);
-      const proveedores = existe
-        ? state.proveedores.map((p) => (p.id === a.proveedor.id ? a.proveedor : p))
-        : [...state.proveedores, a.proveedor];
-      const productoProveedor = [
-        ...state.productoProveedor.filter((pp) => pp.proveedorId !== a.proveedor.id),
-        ...a.productoIds.map((productoId) => ({ proveedorId: a.proveedor.id, productoId })),
-      ];
-      return { ...state, proveedores, productoProveedor };
-    }
-    case 'registrarConteos':
-      // Nunca se borra ni se reemplaza un conteo anterior: solo se agregan.
-      return { ...state, conteos: [...state.conteos, ...a.conteos] };
-    case 'registrarRecepcion':
-      return { ...state, recepciones: [...state.recepciones, a.recepcion] };
-    case 'restablecer':
-      return a.data;
-  }
-}
+export type Conexion = 'cargando' | 'conectado' | 'sin_conexion';
+
+export type Resultado<T> = { ok: true; valor: T } | { ok: false; error: MensajeError };
 
 export interface Aviso {
   id: number;
@@ -55,40 +20,103 @@ export interface Aviso {
 
 interface Store {
   data: AppData;
-  dispatch: (a: Accion) => void;
+  vistas: Vistas;
+  conexion: Conexion;
+  /** true cuando ya se leyó la base al menos una vez */
+  cargado: boolean;
+  /** Motivo del último error al leer la base (null si leyó bien) */
+  errorCarga: string | null;
+  recargar: () => Promise<boolean>;
+  /** Ejecuta una escritura en la base, traduce los errores y, si sale bien, vuelve a leer los datos. */
+  ejecutar: <T>(operacion: () => Promise<T>) => Promise<Resultado<T>>;
   avisar: (texto: string, tipo?: Aviso['tipo']) => void;
   avisos: Aviso[];
-  restablecer: () => void;
   nuevoId: typeof nuevoId;
 }
+
+const VACIO: AppData = { productos: [], proveedores: [], productoProveedor: [], conteos: [], recepciones: [], borradores: [] };
+const VISTAS_VACIAS: Vistas = { stock: [], visitas: [], vencimientos: [] };
+/** Cada cuánto se vuelve a leer la base para ver cambios hechos desde otro celular. */
+const REFRESCO_MS = 30_000;
 
 const Ctx = createContext<Store | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [data, dispatch] = useReducer(reducer, undefined, cargarDatos);
+  const [data, setData] = useState<AppData>(VACIO);
+  const [vistas, setVistas] = useState<Vistas>(VISTAS_VACIAS);
+  const [conexion, setConexion] = useState<Conexion>('cargando');
+  const [cargado, setCargado] = useState(false);
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
   const [avisos, setAvisos] = useState<Aviso[]>([]);
   const contador = useRef(0);
+  const lectura = useRef(0);
 
   const avisar = useCallback((texto: string, tipo: Aviso['tipo'] = 'ok') => {
     const id = ++contador.current;
     setAvisos((a) => [...a, { id, texto, tipo }]);
-    window.setTimeout(() => setAvisos((a) => a.filter((x) => x.id !== id)), 3500);
+    window.setTimeout(() => setAvisos((a) => a.filter((x) => x.id !== id)), tipo === 'error' ? 6000 : 3500);
   }, []);
 
+  const recargar = useCallback(async (): Promise<boolean> => {
+    const n = ++lectura.current;
+    try {
+      const r = await cargarTodo();
+      if (n !== lectura.current) return true; // llegó una lectura más nueva
+      setData(r.data);
+      setVistas(r.vistas);
+      setConexion('conectado');
+      setCargado(true);
+      setErrorCarga(null);
+      return true;
+    } catch (e) {
+      if (n !== lectura.current) return false;
+      // Nunca se cae en silencio a datos locales: se muestra el aviso de sin conexión.
+      setConexion('sin_conexion');
+      setErrorCarga(mensajeError(e).texto);
+      return false;
+    }
+  }, []);
+
+  const ejecutar = useCallback(async <T,>(operacion: () => Promise<T>): Promise<Resultado<T>> => {
+    try {
+      const valor = await operacion();
+      await recargar();
+      return { ok: true, valor };
+    } catch (e) {
+      const error = mensajeError(e);
+      if (error.sinConexion) setConexion('sin_conexion');
+      else void recargar(); // la base rechazó: se relee por si quedó algo a medias
+      return { ok: false, error };
+    }
+  }, [recargar]);
+
   useEffect(() => {
-    if (guardarDatos(data)) return;
-    // Almacenamiento lleno (casi siempre por las fotos): se guardan los datos sin las fotos.
-    const sinFotos: AppData = {
-      ...data,
-      recepciones: data.recepciones.map((r) => (r.imagen?.startsWith('data:') ? { ...r, imagen: undefined } : r)),
+    void recargar();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void recargar();
+    }, REFRESCO_MS);
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') void recargar();
     };
-    if (guardarDatos(sinFotos)) avisar('Se guardaron los datos, pero no las fotos: el navegador no tiene más espacio.', 'info');
-    else avisar('No se pudieron guardar los cambios en este navegador.', 'error');
-  }, [data, avisar]);
+    const sinRed = () => setConexion('sin_conexion');
+    const conRed = () => void recargar();
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    window.addEventListener('offline', sinRed);
+    window.addEventListener('online', conRed);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
+      window.removeEventListener('offline', sinRed);
+      window.removeEventListener('online', conRed);
+    };
+  }, [recargar]);
 
-  const restablecer = useCallback(() => dispatch({ type: 'restablecer', data: crearDatosDeEjemplo() }), []);
-
-  const value = useMemo(() => ({ data, dispatch, avisar, avisos, restablecer, nuevoId }), [data, avisar, avisos, restablecer]);
+  const value = useMemo(
+    () => ({ data, vistas, conexion, cargado, errorCarga, recargar, ejecutar, avisar, avisos, nuevoId }),
+    [data, vistas, conexion, cargado, errorCarga, recargar, ejecutar, avisar, avisos],
+  );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

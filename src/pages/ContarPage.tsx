@@ -5,8 +5,9 @@ import { formatFechaCorta, haceCuanto } from '../lib/dates';
 import { leerNumero, validarCantidadConteo } from '../lib/validation';
 import { irA } from '../lib/router';
 import { Icon } from '../components/Icon';
-import { Vacio } from '../components/ui';
-import type { Conteo, Producto } from '../types';
+import { EstadoConexion, Vacio } from '../components/ui';
+import { registrarConteos, type NuevoConteo } from '../lib/datos';
+import type { Producto } from '../types';
 
 const TODOS = '__todos__';
 
@@ -16,12 +17,13 @@ interface Fila {
 }
 
 export function ContarPage({ proveedorInicial }: { proveedorInicial: string | null }) {
-  const { data, dispatch, avisar, nuevoId } = useStore();
+  const { data, ejecutar, avisar } = useStore();
   const valido = proveedorInicial && (proveedorInicial === TODOS || data.proveedores.some((p) => p.id === proveedorInicial));
   const proveedorId: string | null = valido ? proveedorInicial : null;
   const [filas, setFilas] = useState<Record<string, Fila>>({});
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
 
   const productos: Producto[] = useMemo(() => {
     if (!proveedorId) return [];
@@ -51,10 +53,10 @@ export function ContarPage({ proveedorInicial }: { proveedorInicial: string | nu
 
   const completados = productos.filter((p) => (filas[p.id]?.cantidad ?? '').trim() !== '').length;
 
-  const guardar = () => {
+  const guardar = async () => {
+    if (guardando) return;
     const nuevosErrores: Record<string, string> = {};
-    const conteos: Conteo[] = [];
-    const ahora = new Date().toISOString();
+    const conteos: NuevoConteo[] = [];
     for (const p of productos) {
       const f = filas[p.id];
       if (!f) continue;
@@ -70,10 +72,8 @@ export function ContarPage({ proveedorInicial }: { proveedorInicial: string | nu
       }
       if (typeof n !== 'number') continue;
       conteos.push({
-        id: nuevoId('c'),
         productoId: p.id,
         cantidad: n,
-        fechaHora: ahora,
         ...(p.perecedero && f.vencimiento ? { fechaVencimiento: f.vencimiento } : {}),
       });
     }
@@ -86,7 +86,14 @@ export function ContarPage({ proveedorInicial }: { proveedorInicial: string | nu
       setErrorGeneral('Cargá la cantidad de al menos un producto.');
       return;
     }
-    dispatch({ type: 'registrarConteos', conteos });
+    setGuardando(true);
+    const r = await ejecutar(() => registrarConteos(conteos));
+    setGuardando(false);
+    if (!r.ok) {
+      // Por ejemplo, la base rechaza un conteo negativo o no hay conexión: no se pierde lo cargado
+      setErrorGeneral(r.error.texto);
+      return;
+    }
     setFilas({});
     avisar(conteos.length === 1 ? 'Se guardó 1 conteo.' : `Se guardaron ${conteos.length} conteos.`);
   };
@@ -96,6 +103,7 @@ export function ContarPage({ proveedorInicial }: { proveedorInicial: string | nu
   return (
     <>
       <header className="cabecera">
+        <EstadoConexion />
         <p className="cabecera-marca">Contar</p>
         <h1>{nombreSeleccion ?? '¿De qué proveedor?'}</h1>
       </header>
@@ -177,8 +185,8 @@ export function ContarPage({ proveedorInicial }: { proveedorInicial: string | nu
 
           <div className="barra-accion">
             {errorGeneral && <p className="barra-error" role="alert"><Icon name="alerta" size={18} /> {errorGeneral}</p>}
-            <button type="button" className="btn btn-primario btn-bloque btn-grande" onClick={guardar}>
-              <Icon name="check" /> Guardar conteo{completados > 0 ? ` (${completados})` : ''}
+            <button type="button" className="btn btn-primario btn-bloque btn-grande" onClick={guardar} disabled={guardando}>
+              <Icon name="check" /> {guardando ? 'Guardando…' : `Guardar conteo${completados > 0 ? ` (${completados})` : ''}`}
             </button>
           </div>
         </>

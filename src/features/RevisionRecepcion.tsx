@@ -3,12 +3,12 @@ import { useStore } from '../state/store';
 import { CONFIANZA_ALTA, vincularLinea, vincularProveedor } from '../lib/match';
 import { leerNumero, validarRecepcion, type LineaBorrador } from '../lib/validation';
 import { calcularStock, productosDeProveedor } from '../lib/stock';
+import { confirmarRecepcion, type LineaAConfirmar } from '../lib/datos';
 import { isoDate } from '../lib/dates';
 import { Icon } from '../components/Icon';
-import { Campo } from '../components/ui';
+import { Campo, EstadoConexion } from '../components/ui';
 import { ProductoForm } from './ProductoForm';
-import type { Extraccion } from '../demo/remitos';
-import type { AppData, Producto, Recepcion } from '../types';
+import type { AppData, Borrador, Producto } from '../types';
 
 export interface ResultadoConfirmacion {
   proveedor: string;
@@ -19,9 +19,10 @@ interface Props {
   origen: 'manual' | 'remito_foto';
   /** URL para mostrar la imagen */
   imagenUrl?: string;
-  /** Valor que se guarda en la recepción (data URL o "ejemplo:…") */
-  imagenGuardar?: string;
-  extraccion?: Extraccion;
+  /** Ruta de la foto en el bucket (carga manual con foto) */
+  imagenPath?: string | null;
+  /** Recepción en borrador guardada en la base (remito leído por la IA o de ejemplo) */
+  borrador?: Borrador;
   onConfirmada: (r: ResultadoConfirmacion) => void;
   onCancelar: () => void;
 }
@@ -33,13 +34,14 @@ function lineaVacia(): LineaBorrador {
   return { key: nuevaClave(), descripcion: '', productoId: null, cantidad: '', fechaVencimiento: '', revisar: false, ignorada: false };
 }
 
-function armarBorrador(data: AppData, extraccion: Extraccion | undefined) {
-  if (!extraccion) return { proveedorId: '', fecha: isoDate(new Date()), lineas: [lineaVacia()] };
-  const proveedorId = vincularProveedor(extraccion.proveedor, data.proveedores) ?? '';
+function armarBorrador(data: AppData, borrador: Borrador | undefined) {
+  if (!borrador) return { proveedorId: '', fecha: isoDate(new Date()), lineas: [lineaVacia()] };
+  const proveedorId = borrador.proveedorId ?? vincularProveedor(borrador.proveedorTexto ?? '', data.proveedores) ?? '';
   const ids = new Set(proveedorId ? productosDeProveedor(data, proveedorId).map((p) => p.id) : []);
-  const lineas: LineaBorrador[] = extraccion.lineas.map((l) => {
-    const v = vincularLinea(l.descripcion, data.productos, ids);
-    const confianza = Math.min(v.confianza, l.confianzaLectura ?? 1);
+  const lineas: LineaBorrador[] = borrador.lineas.map((l) => {
+    // Si la línea no quedó vinculada, se intenta de nuevo con el catálogo actual
+    const v = l.productoId ? { productoId: l.productoId, confianza: l.confianzaVinculo ?? 1 } : vincularLinea(l.descripcion, data.productos, ids);
+    const confianza = Math.min(v.confianza, l.confianza ?? 1);
     return {
       key: nuevaClave(),
       descripcion: l.descripcion,
@@ -51,7 +53,7 @@ function armarBorrador(data: AppData, extraccion: Extraccion | undefined) {
       ignorada: false,
     };
   });
-  return { proveedorId, fecha: extraccion.fecha || isoDate(new Date()), lineas };
+  return { proveedorId, fecha: borrador.fecha || isoDate(new Date()), lineas: lineas.length > 0 ? lineas : [lineaVacia()] };
 }
 
 function tituloDesdeRemito(desc: string): string {
@@ -59,9 +61,10 @@ function tituloDesdeRemito(desc: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-export function RevisionRecepcion({ origen, imagenUrl, imagenGuardar, extraccion, onConfirmada, onCancelar }: Props) {
-  const { data, dispatch, nuevoId } = useStore();
-  const inicial = useMemo(() => armarBorrador(data, extraccion), []); // eslint-disable-line react-hooks/exhaustive-deps
+export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onConfirmada, onCancelar }: Props) {
+  const { data, ejecutar } = useStore();
+  const inicial = useMemo(() => armarBorrador(data, borrador), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [guardando, setGuardando] = useState(false);
   const [proveedorId, setProveedorId] = useState(inicial.proveedorId);
   const [fecha, setFecha] = useState(inicial.fecha);
   const [lineas, setLineas] = useState<LineaBorrador[]>(inicial.lineas);
@@ -84,7 +87,8 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenGuardar, extraccion
   const pendientes = lineas.filter((l) => !l.ignorada && !l.productoId).length;
   const aRevisar = lineas.filter((l) => !l.ignorada && l.revisar).length;
 
-  const confirmar = () => {
+  const confirmar = async () => {
+    if (guardando) return;
     const r = validarRecepcion(proveedorId, fecha, lineas, hoy);
     setErrores(r.errores);
     setErrorGeneral(r.errorGeneral);
@@ -101,38 +105,48 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenGuardar, extraccion
         fechaVencimiento: [prev?.fechaVencimiento, l.fechaVencimiento].filter(Boolean).sort()[0],
       });
     }
-    const recepcion: Recepcion = {
-      id: nuevoId('r'),
+    const lineasConfirmar: LineaAConfirmar[] = [
+      ...[...agrupadas].map(([productoId, v]) => ({ productoId, cantidad: v.cantidad, ...(v.fechaVencimiento ? { fechaVencimiento: v.fechaVencimiento } : {}) })),
+      // Las líneas ignoradas quedan registradas (no suman al stock)
+      ...lineas
+        .filter((l) => l.ignorada && l.descripcion)
+        .map((l) => ({ productoId: null, descripcion: l.descripcion, cantidad: Number(leerNumero(l.cantidad)) || 0, ignorada: true })),
+    ];
+
+    const antes = new Map([...agrupadas.keys()].map((id) => {
+      const p = data.productos.find((x) => x.id === id) as Producto;
+      return [id, calcularStock(data, p).stock];
+    }));
+    // Si el proveedor trajo un producto que no tenía asociado, se asocia.
+    const asociar = [...agrupadas.keys()].filter((id) => !idsDelProveedor.has(id));
+    const proveedor = data.proveedores.find((p) => p.id === proveedorId);
+
+    setGuardando(true);
+    const res = await ejecutar(() => confirmarRecepcion({
+      borradorId: borrador?.id,
       proveedorId,
       fecha,
-      registradaEn: new Date().toISOString(),
       origen,
-      ...(imagenGuardar ? { imagen: imagenGuardar } : {}),
-      lineas: [...agrupadas].map(([productoId, v]) => ({ productoId, cantidad: v.cantidad, ...(v.fechaVencimiento ? { fechaVencimiento: v.fechaVencimiento } : {}) })),
-    };
-
-    const antes = new Map(recepcion.lineas.map((l) => {
-      const p = data.productos.find((x) => x.id === l.productoId) as Producto;
-      return [l.productoId, calcularStock(data, p).stock];
+      imagenPath: imagenPath ?? null,
+      lineas: lineasConfirmar,
+      asociar,
     }));
-    dispatch({ type: 'registrarRecepcion', recepcion });
-
-    // Si el proveedor trajo un producto que no tenía asociado, se asocia.
-    const nuevos = recepcion.lineas.map((l) => l.productoId).filter((id) => !idsDelProveedor.has(id));
-    const proveedor = data.proveedores.find((p) => p.id === proveedorId);
-    if (proveedor && nuevos.length > 0) {
-      dispatch({ type: 'guardarProveedor', proveedor, productoIds: [...idsDelProveedor, ...nuevos] });
+    setGuardando(false);
+    if (!res.ok) {
+      // La base rechazó (por ejemplo, líneas sin vincular) o no hay conexión: se muestra el motivo
+      setErrorGeneral(res.error.texto);
+      return;
     }
 
     onConfirmada({
       proveedor: proveedor?.nombre ?? '',
-      cambios: recepcion.lineas.map((l) => {
-        const a = antes.get(l.productoId) ?? null;
+      cambios: [...agrupadas].map(([id, v]) => {
+        const a = antes.get(id) ?? null;
         return {
-          nombre: data.productos.find((p) => p.id === l.productoId)?.nombre ?? '',
+          nombre: data.productos.find((p) => p.id === id)?.nombre ?? '',
           antes: a,
-          despues: (a ?? 0) + l.cantidad,
-          recibido: l.cantidad,
+          despues: (a ?? 0) + v.cantidad,
+          recibido: v.cantidad,
         };
       }),
     });
@@ -145,6 +159,7 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenGuardar, extraccion
   return (
     <div className="revision">
       <header className="cabecera">
+        <EstadoConexion />
         <p className="cabecera-marca">Recepción · revisión</p>
         <h1>{origen === 'remito_foto' ? 'Revisá lo que leyó la IA' : 'Carga manual'}</h1>
         {origen === 'remito_foto' && (
@@ -289,9 +304,9 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenGuardar, extraccion
       <div className="barra-accion">
         {errorGeneral && <p className="barra-error" role="alert"><Icon name="alerta" size={18} /> {errorGeneral}</p>}
         <div className="barra-botones">
-          <button type="button" className="btn btn-fantasma" onClick={cancelar}>Cancelar</button>
-          <button type="button" className="btn btn-primario btn-grande" onClick={confirmar}>
-            <Icon name="check" /> Confirmar recepción
+          <button type="button" className="btn btn-fantasma" onClick={cancelar} disabled={guardando}>Cancelar</button>
+          <button type="button" className="btn btn-primario btn-grande" onClick={confirmar} disabled={guardando}>
+            <Icon name="check" /> {guardando ? 'Guardando…' : 'Confirmar recepción'}
           </button>
         </div>
       </div>

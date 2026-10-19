@@ -2,14 +2,9 @@ import type { Extraccion } from '../demo/remitos';
 
 // Lectura del remito con un modelo de IA con visión.
 //
-// La app es solo front-end: no puede guardar una clave de API de forma segura.
-// Por eso la lectura real se hace a través de un servicio propio (por ejemplo,
-// una función serverless de Vercel) cuya URL se configura en la variable
-// VITE_REMITO_API_URL. El servicio recibe { imagen: "data:image/jpeg;base64,…" }
-// y devuelve un JSON con la forma de `Extraccion`.
-//
-// Si no hay servicio configurado, la app avisa y ofrece la carga manual o el
-// remito de ejemplo (modo demo).
+// La clave del modelo NUNCA está en el navegador: la app le manda la foto a una
+// función del servidor (api/leer-remito.js, en Vercel), que es la que tiene la
+// clave (variable VISION_API_KEY, sin NEXT_PUBLIC_) y llama al modelo.
 
 export class ErrorLectura extends Error {
   constructor(public motivo: 'sin_ia' | 'ilegible' | 'red', mensaje: string) {
@@ -17,47 +12,67 @@ export class ErrorLectura extends Error {
   }
 }
 
-type Lector = (imagen: string) => Promise<Extraccion>;
-
-declare global {
-  interface Window {
-    /** Permite que la página donde se publica la demo aporte su propio lector. */
-    GONDOLA_LEER_REMITO?: Lector;
-  }
+/** Respuesta de la función, con el formato que pide la consigna. */
+interface RespuestaIA {
+  proveedor?: string | null;
+  fecha?: string | null;
+  lineas?: { descripcion?: string; cantidad?: number | null; fecha_vencimiento?: string | null; confianza?: number }[];
+  error?: string;
+  mensaje?: string;
 }
 
-function urlServicio(): string | undefined {
+function urlServicio(): string {
   try {
-    return import.meta.env?.VITE_REMITO_API_URL || undefined;
+    return import.meta.env?.VITE_REMITO_API_URL || '/api/leer-remito';
   } catch {
-    return undefined;
+    return '/api/leer-remito';
   }
 }
 
-export function hayLecturaConIA(): boolean {
-  return !!urlServicio() || typeof window.GONDOLA_LEER_REMITO === 'function';
-}
+const esFecha = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
-export async function leerRemito(imagen: string): Promise<Extraccion> {
-  let extraccion: Extraccion;
-  if (typeof window.GONDOLA_LEER_REMITO === 'function') {
-    extraccion = await window.GONDOLA_LEER_REMITO(imagen);
-  } else {
-    const url = urlServicio();
-    if (!url) {
-      throw new ErrorLectura('sin_ia', 'La lectura automática de remitos no está configurada en esta versión.');
-    }
-    let res: Response;
-    try {
-      res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imagen }) });
-    } catch {
-      throw new ErrorLectura('red', 'No se pudo conectar con el servicio de lectura. Revisá la conexión.');
-    }
-    if (!res.ok) throw new ErrorLectura('ilegible', 'No se pudo leer el remito.');
-    extraccion = (await res.json()) as Extraccion;
+/**
+ * Manda la foto (data URL JPEG) y la lista de productos del catálogo.
+ * Devuelve la extracción normalizada y la respuesta cruda (se guarda en datos_ia).
+ */
+export async function leerRemito(imagen: string, catalogo: string[]): Promise<{ extraccion: Extraccion; crudo: RespuestaIA }> {
+  let res: Response;
+  try {
+    res = await fetch(urlServicio(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imagen, productos: catalogo }),
+    });
+  } catch {
+    throw new ErrorLectura('red', 'No se pudo conectar con el servicio de lectura. Revisá la conexión.');
   }
-  if (!extraccion || !Array.isArray(extraccion.lineas) || extraccion.lineas.length === 0) {
+  let cuerpo: RespuestaIA = {};
+  try {
+    cuerpo = (await res.json()) as RespuestaIA;
+  } catch {
+    // respuesta vacía o no JSON (por ejemplo, la función no existe)
+  }
+  if (!res.ok) {
+    if (res.status === 404 || cuerpo.error === 'sin_ia') {
+      throw new ErrorLectura('sin_ia', cuerpo.mensaje ?? 'La lectura automática de remitos no está configurada.');
+    }
+    throw new ErrorLectura('ilegible', cuerpo.mensaje ?? 'No se pudo leer el remito.');
+  }
+
+  const lineas = (Array.isArray(cuerpo.lineas) ? cuerpo.lineas : [])
+    .filter((l) => l && typeof l.descripcion === 'string' && l.descripcion.trim() !== '')
+    .map((l) => ({
+      descripcion: (l.descripcion as string).trim(),
+      cantidad: typeof l.cantidad === 'number' && Number.isFinite(l.cantidad) ? l.cantidad : null,
+      ...(esFecha(l.fecha_vencimiento) ? { fechaVencimiento: l.fecha_vencimiento } : {}),
+      ...(typeof l.confianza === 'number' ? { confianzaLectura: Math.max(0, Math.min(1, l.confianza)) } : {}),
+    }));
+
+  if (lineas.length === 0) {
     throw new ErrorLectura('ilegible', 'No se pudo leer el remito: la imagen no es legible o no parece un remito.');
   }
-  return extraccion;
+  return {
+    extraccion: { proveedor: typeof cuerpo.proveedor === 'string' ? cuerpo.proveedor : '', fecha: esFecha(cuerpo.fecha) ? cuerpo.fecha : '', lineas },
+    crudo: cuerpo,
+  };
 }

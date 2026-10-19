@@ -1,35 +1,51 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { REMITOS_EJEMPLO, urlRemitoEjemplo, type Extraccion } from '../demo/remitos';
-import { comprimirImagen } from '../lib/imagen';
-import { ErrorLectura, hayLecturaConIA, leerRemito } from '../lib/remitoIA';
-import { formatFechaCorta, parseIsoDate } from '../lib/dates';
+import { urlRemitoEjemplo } from '../demo/remitos';
+import { comprimirImagen, dataUrlABlob } from '../lib/imagen';
+import { ErrorLectura, leerRemito } from '../lib/remitoIA';
+import { cancelarBorrador, crearBorradorDesdeFoto, subirFotoRemito } from '../lib/datos';
+import { urlFirmada } from '../lib/supabase';
+import { vincularLinea, vincularProveedor } from '../lib/match';
+import { productosDeProveedor } from '../lib/stock';
+import { formatFechaCorta, formatFechaHora, parseIsoDate } from '../lib/dates';
 import { Icon } from '../components/Icon';
-import { Hoja, Vacio } from '../components/ui';
+import { EstadoConexion, Hoja, Vacio } from '../components/ui';
 import { RevisionRecepcion, type ResultadoConfirmacion } from '../features/RevisionRecepcion';
-import type { Recepcion } from '../types';
+import type { Borrador, LineaBorradorBase, Recepcion } from '../types';
 
 type Paso =
   | { tipo: 'inicio' }
   | { tipo: 'leyendo'; imagen: string }
-  | { tipo: 'error'; imagen: string; mensaje: string }
-  | { tipo: 'revision'; origen: 'manual' | 'remito_foto'; imagenUrl?: string; imagenGuardar?: string; extraccion?: Extraccion };
+  | { tipo: 'error'; imagen: string; imagenPath: string | null; mensaje: string }
+  | {
+      tipo: 'revision';
+      origen: 'manual' | 'remito_foto';
+      imagenUrl?: string;
+      imagenPath?: string | null;
+      borrador?: Borrador;
+      /** Al cancelar, el borrador se marca como cancelado (fotos recién leídas) */
+      descartarAlCancelar?: boolean;
+    };
 
-/** Convierte lo guardado en la recepción en una URL para mostrar. */
-export function urlImagen(imagen?: string): string | undefined {
+const esEjemplo = (b: Borrador) => !!b.imagen?.startsWith('ejemplo:');
+
+/** Convierte la imagen guardada en la recepción en una URL para mostrar. */
+export async function resolverImagen(imagen: string | undefined, fecha: string | null): Promise<string | undefined> {
   if (!imagen) return undefined;
   if (imagen.startsWith('ejemplo:')) {
-    const [, id, fecha] = imagen.split(':');
+    const id = imagen.split(':')[1];
     return urlRemitoEjemplo(id, fecha ? parseIsoDate(fecha) : new Date()) ?? undefined;
   }
-  return imagen;
+  if (imagen.startsWith('data:')) return imagen;
+  return (await urlFirmada(imagen)) ?? undefined;
 }
 
 export function RecepcionPage() {
-  const { data, avisar } = useStore();
+  const { data, avisar, ejecutar, nuevoId } = useStore();
   const [paso, setPaso] = useState<Paso>({ tipo: 'inicio' });
   const [resultado, setResultado] = useState<ResultadoConfirmacion | null>(null);
   const [detalle, setDetalle] = useState<Recepcion | null>(null);
+  const [abriendo, setAbriendo] = useState<string | null>(null);
   const camara = useRef<HTMLInputElement>(null);
   const galeria = useRef<HTMLInputElement>(null);
 
@@ -44,27 +60,73 @@ export function RecepcionPage() {
       return;
     }
     setPaso({ tipo: 'leyendo', imagen });
-    try {
-      const extraccion = await leerRemito(imagen);
-      setPaso({ tipo: 'revision', origen: 'remito_foto', imagenUrl: imagen, imagenGuardar: imagen, extraccion });
-    } catch (e) {
-      const mensaje = e instanceof ErrorLectura ? e.message : 'No se pudo leer el remito.';
-      setPaso({ tipo: 'error', imagen, mensaje });
-    }
-  };
 
-  const usarEjemplo = (id: string) => {
-    const r = REMITOS_EJEMPLO.find((x) => x.id === id);
-    if (!r) return;
-    const hoy = new Date();
-    setResultado(null);
+    // Se guarda la foto en el bucket (si existe) mientras la IA la lee.
+    const [subida, lectura] = await Promise.allSettled([
+      subirFotoRemito(dataUrlABlob(imagen), nuevoId()),
+      leerRemito(imagen, data.productos.map((p) => p.nombre)),
+    ]);
+    const imagenPath = subida.status === 'fulfilled' ? subida.value : null;
+
+    if (lectura.status === 'rejected') {
+      const e = lectura.reason;
+      setPaso({ tipo: 'error', imagen, imagenPath, mensaje: e instanceof ErrorLectura ? e.message : 'No se pudo leer el remito.' });
+      return;
+    }
+    const { extraccion, crudo } = lectura.value;
+
+    // El vínculo final lo hace la app, por similitud de nombre.
+    const proveedorId = vincularProveedor(extraccion.proveedor, data.proveedores);
+    const ids = new Set(proveedorId ? productosDeProveedor(data, proveedorId).map((p) => p.id) : []);
+    const lineas: LineaBorradorBase[] = extraccion.lineas.map((l) => {
+      const v = vincularLinea(l.descripcion, data.productos, ids);
+      return {
+        productoId: v.productoId,
+        descripcion: l.descripcion,
+        cantidad: l.cantidad,
+        ...(l.fechaVencimiento ? { fechaVencimiento: l.fechaVencimiento } : {}),
+        ...(l.confianzaLectura !== undefined ? { confianza: l.confianzaLectura } : {}),
+        confianzaVinculo: v.confianza,
+      };
+    });
+
+    // Se crea la recepción en BORRADOR: nada suma al stock hasta "Confirmar recepción".
+    const r = await ejecutar(() => crearBorradorDesdeFoto({
+      proveedorId,
+      fecha: extraccion.fecha || null,
+      imagenPath,
+      datosIa: crudo,
+      lineas,
+    }));
+    if (!r.ok) {
+      setPaso({ tipo: 'error', imagen, imagenPath, mensaje: `Se leyó el remito, pero no se pudo guardar el borrador. ${r.error.texto}` });
+      return;
+    }
     setPaso({
       tipo: 'revision',
       origen: 'remito_foto',
-      imagenUrl: urlRemitoEjemplo(id, hoy) ?? undefined,
-      imagenGuardar: `ejemplo:${id}:${r.extraccion(hoy).fecha}`,
-      extraccion: r.extraccion(hoy),
+      imagenUrl: imagen,
+      descartarAlCancelar: true,
+      borrador: {
+        id: r.valor,
+        proveedorId,
+        proveedorTexto: extraccion.proveedor,
+        fecha: extraccion.fecha || null,
+        origen: 'remito_foto',
+        ...(imagenPath ? { imagen: imagenPath } : {}),
+        creadaEn: new Date().toISOString(),
+        lineas,
+      },
     });
+  };
+
+  /** Abre un borrador guardado en la base (remito de ejemplo o pendiente de revisar). */
+  const abrirBorrador = async (b: Borrador) => {
+    setResultado(null);
+    setAbriendo(b.id);
+    const imagenUrl = await resolverImagen(b.imagen, b.fecha);
+    setAbriendo(null);
+    setPaso({ tipo: 'revision', origen: 'remito_foto', imagenUrl, borrador: b });
   };
 
   if (paso.tipo === 'revision') {
@@ -72,9 +134,12 @@ export function RecepcionPage() {
       <RevisionRecepcion
         origen={paso.origen}
         imagenUrl={paso.imagenUrl}
-        imagenGuardar={paso.imagenGuardar}
-        extraccion={paso.extraccion}
-        onCancelar={() => setPaso({ tipo: 'inicio' })}
+        imagenPath={paso.imagenPath}
+        borrador={paso.borrador}
+        onCancelar={() => {
+          if (paso.descartarAlCancelar && paso.borrador) void ejecutar(() => cancelarBorrador(paso.borrador!.id));
+          setPaso({ tipo: 'inicio' });
+        }}
         onConfirmada={(r) => {
           setResultado(r);
           setPaso({ tipo: 'inicio' });
@@ -85,11 +150,16 @@ export function RecepcionPage() {
     );
   }
 
+  const ejemplos = data.borradores.filter(esEjemplo);
+  const pendientes = data.borradores.filter((b) => !esEjemplo(b));
+  const nombreProveedor = (b: Borrador) =>
+    data.proveedores.find((p) => p.id === b.proveedorId)?.nombre ?? b.proveedorTexto ?? 'Proveedor sin identificar';
   const recientes = [...data.recepciones].sort((a, b) => b.registradaEn.localeCompare(a.registradaEn)).slice(0, 8);
 
   return (
     <>
       <header className="cabecera">
+        <EstadoConexion />
         <p className="cabecera-marca">Recepción</p>
         <h1>¿Qué te trajo el proveedor?</h1>
       </header>
@@ -119,18 +189,19 @@ export function RecepcionPage() {
               <div className="lectura-texto">
                 <span className="spinner" aria-hidden="true" />
                 <p><strong>Leyendo el remito…</strong></p>
+                <p className="texto-suave">Puede tardar unos segundos.</p>
               </div>
             ) : (
               <div className="lectura-texto" role="alert">
                 <p className="texto-error"><Icon name="alerta" size={18} /> <strong>{paso.mensaje}</strong></p>
-                <p className="texto-suave">Podés cargarlo a mano (la foto queda guardada con la recepción) o probar con otra foto.</p>
+                <p className="texto-suave">Podés cargarlo a mano (la foto queda con la recepción) o probar con otra foto.</p>
               </div>
             )}
           </div>
           {paso.tipo === 'error' && (
             <div className="acciones-columna">
-              <button type="button" className="btn btn-primario btn-bloque" onClick={() => setPaso({ tipo: 'revision', origen: 'manual', imagenUrl: paso.imagen, imagenGuardar: paso.imagen })}>
-                <Icon name="lapiz" /> Cargar a mano con esta foto
+              <button type="button" className="btn btn-primario btn-bloque" onClick={() => setPaso({ tipo: 'revision', origen: 'manual', imagenUrl: paso.imagen, imagenPath: paso.imagenPath })}>
+                <Icon name="lapiz" /> Cargar a mano
               </button>
               <button type="button" className="btn btn-secundario btn-bloque" onClick={() => setPaso({ tipo: 'inicio' })}>
                 Probar con otra foto
@@ -144,11 +215,7 @@ export function RecepcionPage() {
         <>
           <section className="tarjeta">
             <h3 className="tarjeta-titulo"><Icon name="camara" /> Foto del remito</h3>
-            <p className="texto-suave">
-              {hayLecturaConIA()
-                ? 'La IA lee el remito y vos revisás antes de guardar.'
-                : 'La lectura automática no está configurada en esta versión: usá un remito de ejemplo o cargalo a mano.'}
-            </p>
+            <p className="texto-suave">La IA lee el remito y vos revisás antes de guardar.</p>
             <div className="acciones-2">
               <button type="button" className="btn btn-primario btn-grande" onClick={() => camara.current?.click()}>
                 <Icon name="camara" /> Sacar foto
@@ -157,20 +224,37 @@ export function RecepcionPage() {
                 <Icon name="imagen" /> Subir imagen
               </button>
             </div>
-            <input ref={camara} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { alElegirFoto(e.target.files?.[0]); e.target.value = ''; }} />
-            <input ref={galeria} type="file" accept="image/*" hidden data-testid="subir-imagen" onChange={(e) => { alElegirFoto(e.target.files?.[0]); e.target.value = ''; }} />
+            <input ref={camara} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void alElegirFoto(e.target.files?.[0]); e.target.value = ''; }} />
+            <input ref={galeria} type="file" accept="image/*" hidden data-testid="subir-imagen" onChange={(e) => { void alElegirFoto(e.target.files?.[0]); e.target.value = ''; }} />
           </section>
+
+          {pendientes.length > 0 && (
+            <section className="tarjeta">
+              <h3 className="tarjeta-titulo"><Icon name="reloj" /> Remitos pendientes de revisar</h3>
+              <div className="acciones-columna">
+                {pendientes.map((b) => (
+                  <button key={b.id} type="button" className="btn btn-secundario btn-bloque" disabled={abriendo === b.id} onClick={() => void abrirBorrador(b)}>
+                    {nombreProveedor(b)} · {formatFechaHora(b.creadaEn)}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="tarjeta tarjeta-demo">
             <h3 className="tarjeta-titulo"><Icon name="documento" /> Usar remito de ejemplo</h3>
-            <p className="texto-suave">Modo demo: carga un remito ficticio y simula la lectura con IA, con algunos errores para practicar la revisión.</p>
-            <div className="acciones-columna">
-              {REMITOS_EJEMPLO.map((r) => (
-                <button key={r.id} type="button" className="btn btn-secundario btn-bloque" onClick={() => usarEjemplo(r.id)}>
-                  Usar remito de ejemplo · {r.titulo}
-                </button>
-              ))}
-            </div>
+            <p className="texto-suave">Modo demo: abre un remito ficticio ya leído por la IA (guardado en la base como borrador), con algunos errores para practicar la revisión.</p>
+            {ejemplos.length === 0 ? (
+              <p className="texto-suave">No quedan remitos de ejemplo en borrador. Para repetir la demo, corré de nuevo <code>supabase/02_datos_ejemplo.sql</code>.</p>
+            ) : (
+              <div className="acciones-columna">
+                {ejemplos.map((b) => (
+                  <button key={b.id} type="button" className="btn btn-secundario btn-bloque" disabled={abriendo === b.id} onClick={() => void abrirBorrador(b)}>
+                    {abriendo === b.id ? 'Abriendo…' : `Usar remito de ejemplo · ${nombreProveedor(b)}`}
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="tarjeta">
@@ -227,9 +311,21 @@ export function RecepcionPage() {
               </li>
             ))}
           </ul>
-          {urlImagen(detalle.imagen) && <img className="detalle-foto" src={urlImagen(detalle.imagen)} alt="Foto del remito" />}
+          <FotoRecepcion imagen={detalle.imagen} fecha={detalle.fecha} />
         </Hoja>
       )}
     </>
   );
+}
+
+function FotoRecepcion({ imagen, fecha }: { imagen?: string; fecha: string }) {
+  const [url, setUrl] = useState<string | undefined>();
+  useEffect(() => {
+    let vivo = true;
+    void resolverImagen(imagen, fecha).then((u) => vivo && setUrl(u));
+    return () => {
+      vivo = false;
+    };
+  }, [imagen, fecha]);
+  return url ? <img className="detalle-foto" src={url} alt="Foto del remito" /> : null;
 }

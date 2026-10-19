@@ -322,3 +322,50 @@ img { max-width: 100%; display: block; }
 }
 .nav-inferior a.activo { color: var(--azul); }
 .nav-inferior a.activo::before { content: ''; position: absolute; top: 0; left: 28%; right: 28%; height: 3px; border-radius: 0 0 3px 3px; background: var(--azul); }
+
+/* ---------- Conexión con la base (Supabase) ---------- */
+.cabecera { position: relative; }
+.estado-conexion {
+  position: absolute; top: 14px; right: 16px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: #dbe6ff;
+  background: rgba(255,255,255,.12); border-radius: 999px; padding: 3px 10px 3px 8px;
+}
+.estado-conexion-punto { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; box-shadow: 0 0 0 2px rgba(255,255,255,.25); }
+.estado-conexion.conectado .estado-conexion-punto { background: #22c55e; }
+.estado-conexion.cargando .estado-conexion-punto { background: #fbbf24; }
+.estado-conexion.sin_conexion { color: #e5e7eb; }
+
+.banner-conexion {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 10px 16px; background: #374151; color: #fff; font-size: 14px; font-weight: 600;
+}
+.banner-conexion span { flex: 1 1 200px; min-width: 0; }
+.banner-conexion .btn-link { color: #fde68a; }
+
+.form-error {
+  background: var(--rojo-fondo); color: var(--rojo); border: 1px solid var(--rojo-borde);
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; font-weight: 600; font-size: 14px;
+}
+
+.aviso-nube {
+  display: flex; align-items: flex-start; gap: 8px; text-align: left;
+  background: var(--verde-fondo); border: 1px solid #bbf7d0; color: var(--verde);
+  border-radius: var(--radio); padding: 12px 14px; font-size: 14px; font-weight: 600;
+}
+.aviso-nube p { margin: 0; }
+
+/* ---------- Hoy: te falta pedir, por vencer, sin contar ---------- */
+.tarjeta-falta { border-color: var(--rojo-borde); }
+.texto-visita { font-weight: 650; color: var(--suave); margin-top: 2px; }
+.texto-visita.hoy { color: var(--rojo); }
+.tarjeta-ok { display: grid; gap: 4px; border-color: #bbf7d0; background: var(--verde-fondo); }
+.todo-ok { color: var(--verde); font-size: 17px; display: flex; align-items: center; gap: 6px; }
+.nota-seccion { margin: 0 2px; }
+.lista-simple { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid var(--borde); border-radius: var(--radio); overflow: hidden; }
+.item-simple { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
+.item-simple + .item-simple { border-top: 1px solid var(--borde); }
+.item-simple > div { min-width: 0; }
+.btn-chico { min-height: 40px; padding: 6px 14px; font-size: 15px; flex-shrink: 0; }
+.btn:disabled { opacity: .6; cursor: default; }
