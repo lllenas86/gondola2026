@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { BotonRestablecerDemo } from '../features/RestablecerDemo';
 import { useStore } from '../state/store';
 import { urlRemitoEjemplo } from '../demo/remitos';
 import { comprimirImagen, dataUrlABlob } from '../lib/imagen';
@@ -245,7 +246,10 @@ export function RecepcionPage() {
             <h3 className="tarjeta-titulo"><Icon name="documento" /> Usar remito de ejemplo</h3>
             <p className="texto-suave">Modo demo: abre un remito ficticio ya leído por la IA (guardado en la base como borrador), con algunos errores para practicar la revisión.</p>
             {ejemplos.length === 0 ? (
-              <p className="texto-suave">No quedan remitos de ejemplo en borrador. Para repetir la demo, corré de nuevo <code>supabase/02_datos_ejemplo.sql</code>.</p>
+              <div className="acciones-columna">
+                <p className="texto-suave">Ya se usaron los dos remitos de ejemplo. Restablecé la demo para que vuelvan.</p>
+                <BotonRestablecerDemo variante="boton" />
+              </div>
             ) : (
               <div className="acciones-columna">
                 {ejemplos.map((b) => (

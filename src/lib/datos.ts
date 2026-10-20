@@ -2,14 +2,14 @@
 import { db, subirArchivo } from './supabase';
 import { isoDate } from './dates';
 import type {
-  AppData, Borrador, Conteo, DiaSemana, FilaStock, FilaVencimiento, FilaVisita, LineaBorradorBase,
+  AppData, Borrador, Conteo, DiaSemana, FilaConsumo, FilaStock, FilaVencimiento, FilaVisita, LineaBorradorBase,
   Producto, Proveedor, Recepcion, Unidad, Vistas,
 } from '../types';
 
 // ---------- Filas tal como vienen de la base ----------
 
 interface RowProducto { id: string; nombre: string; unidad: string; perecedero: boolean; punto_pedido: number | string }
-interface RowProveedor { id: string; nombre: string; dias_visita: number[] }
+interface RowProveedor { id: string; nombre: string; dias_visita: number[]; telefono?: string | null }
 interface RowProductoProveedor { producto_id: string; proveedor_id: string }
 interface RowConteo { id: string; producto_id: string; cantidad: number | string; fecha_hora: string; fecha_vencimiento: string | null }
 interface RowRecepcion {
@@ -26,6 +26,7 @@ interface RowStock {
   bajo_punto_pedido: boolean; conteo_desactualizado: boolean; fecha_ultimo_conteo: string | null; dias_desde_conteo: number | null;
 }
 interface RowVisita { proveedor_id: string; nombre: string; proxima_visita: string; dias_hasta: number }
+interface RowConsumo { producto_id: string; consumo: number | string | null; dias: number | string | null }
 interface RowVencimiento { producto_id: string; nombre: string; fecha_vencimiento: string; cantidad: number | string; dias_para_vencer: number }
 
 const num = (v: number | string | null | undefined): number => (v === null || v === undefined ? 0 : Number(v));
@@ -40,9 +41,10 @@ const UNIDADES: Unidad[] = ['unidad', 'kg', 'litro', 'paquete', 'caja'];
 // ---------- Carga ----------
 
 export async function cargarTodo(): Promise<{ data: AppData; vistas: Vistas }> {
-  const [productos, proveedores, pp, conteos, recepciones, lineas, stock, visitas, vencimientos] = await Promise.all([
+  const [productos, proveedores, pp, conteos, recepciones, lineas, stock, visitas, vencimientos, consumo, tieneTelefono] = await Promise.all([
     db.select<RowProducto>('productos', 'select=id,nombre,unidad,perecedero,punto_pedido&order=nombre.asc'),
-    db.select<RowProveedor>('proveedores', 'select=id,nombre,dias_visita&order=nombre.asc'),
+    // select=* para que funcione con o sin la columna telefono (supabase/03_pedido_y_demo.sql)
+    db.select<RowProveedor>('proveedores', 'select=*&order=nombre.asc'),
     db.select<RowProductoProveedor>('producto_proveedor', 'select=producto_id,proveedor_id'),
     db.select<RowConteo>('conteos', 'select=id,producto_id,cantidad,fecha_hora,fecha_vencimiento&order=fecha_hora.asc'),
     db.select<RowRecepcion>('recepciones', 'select=*&estado=in.(borrador,confirmada)&order=creada_en.desc'),
@@ -50,6 +52,9 @@ export async function cargarTodo(): Promise<{ data: AppData; vistas: Vistas }> {
     db.select<RowStock>('v_stock_actual', 'select=*'),
     db.select<RowVisita>('v_visitas_proximas', 'select=proveedor_id,nombre,proxima_visita,dias_hasta&order=dias_hasta.asc'),
     db.select<RowVencimiento>('v_vencimientos', 'select=producto_id,nombre,fecha_vencimiento,cantidad,dias_para_vencer&order=fecha_vencimiento.asc'),
+    // Base de la cantidad sugerida. Si la vista no está, la app sigue funcionando sin historial.
+    db.select<RowConsumo>('v_consumo_historico', 'select=producto_id,consumo,dias&order=hasta.asc').catch(() => [] as RowConsumo[]),
+    db.select('proveedores', 'select=telefono&limit=1').then(() => true, () => false),
   ]);
 
   const lineasPor = new Map<string, RowLinea[]>();
@@ -110,7 +115,12 @@ export async function cargarTodo(): Promise<{ data: AppData; vistas: Vistas }> {
       perecedero: p.perecedero,
       puntoDePedido: num(p.punto_pedido),
     })),
-    proveedores: proveedores.map((p) => ({ id: p.id, nombre: p.nombre, diasDeVisita: (p.dias_visita ?? []).map(diaDesdeBase) })),
+    proveedores: proveedores.map((p): Proveedor => ({
+      id: p.id,
+      nombre: p.nombre,
+      diasDeVisita: (p.dias_visita ?? []).map(diaDesdeBase),
+      ...(p.telefono ? { telefono: p.telefono } : {}),
+    })),
     productoProveedor: pp.map((x) => ({ productoId: x.producto_id, proveedorId: x.proveedor_id })),
     conteos: conteos.map((c): Conteo => ({
       id: c.id,
@@ -142,6 +152,10 @@ export async function cargarTodo(): Promise<{ data: AppData; vistas: Vistas }> {
       cantidad: num(v.cantidad),
       diasParaVencer: v.dias_para_vencer,
     })),
+    consumo: consumo
+      .filter((c) => c.consumo !== null && c.dias !== null)
+      .map((c): FilaConsumo => ({ productoId: c.producto_id, consumo: num(c.consumo), dias: num(c.dias) })),
+    tieneTelefono,
   };
 
   return { data, vistas };
@@ -163,8 +177,13 @@ export async function guardarProducto(p: Producto, esNuevo: boolean, proveedorId
   return { ...p, id: r?.id ?? p.id, nombre: fila.nombre };
 }
 
-export async function guardarProveedor(p: Proveedor, esNuevo: boolean, productoIds: string[]): Promise<void> {
-  const fila = { nombre: p.nombre.trim(), dias_visita: [...new Set(p.diasDeVisita.map(diaHaciaBase))].sort((a, b) => a - b) };
+export async function guardarProveedor(p: Proveedor, esNuevo: boolean, productoIds: string[], conTelefono = false): Promise<void> {
+  const fila = {
+    nombre: p.nombre.trim(),
+    dias_visita: [...new Set(p.diasDeVisita.map(diaHaciaBase))].sort((a, b) => a - b),
+    // La columna existe solo si se corrió supabase/03_pedido_y_demo.sql
+    ...(conTelefono ? { telefono: p.telefono?.trim() || null } : {}),
+  };
   if (esNuevo) await db.insert('proveedores', { id: p.id, ...fila });
   else await db.update('proveedores', `id=eq.${p.id}`, fila);
   await db.borrar('producto_proveedor', `proveedor_id=eq.${p.id}`);
@@ -294,4 +313,11 @@ export async function confirmarRecepcion(d: DatosConfirmacion): Promise<void> {
 /** Descarta un borrador (queda registrado como cancelado, no suma al stock). */
 export async function cancelarBorrador(id: string): Promise<void> {
   await db.update('recepciones', `id=eq.${id}`, { estado: 'cancelada' });
+}
+
+// ---------- Demo ----------
+
+/** Vuelve la base a los datos de ejemplo (función de supabase/03_pedido_y_demo.sql). */
+export async function restablecerDemo(): Promise<void> {
+  await db.rpc('gondola_restablecer_demo');
 }

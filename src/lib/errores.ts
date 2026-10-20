@@ -35,6 +35,10 @@ export function mensajeError(e: unknown): MensajeError {
     if (e.codigo === 'PGRST205' || e.codigo === '42P01') {
       return { texto: 'Faltan tablas en la base: hay que correr supabase/01_esquema.sql.', sinConexion: true };
     }
+    // Función o columna nueva que todavía no se creó en la base
+    if (e.codigo === 'PGRST202' || e.codigo === 'PGRST204' || e.codigo === '42883' || e.codigo === '42703') {
+      return { texto: 'Falta actualizar la base: corré supabase/03_pedido_y_demo.sql en Supabase → SQL Editor.' };
+    }
     for (const [restriccion, msg] of Object.entries(POR_RESTRICCION)) {
       if (e.message.includes(restriccion)) return msg;
     }

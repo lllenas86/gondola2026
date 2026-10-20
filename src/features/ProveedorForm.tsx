@@ -3,12 +3,14 @@ import { useStore } from '../state/store';
 import { validarProveedor, type Errores } from '../lib/validation';
 import { productosDeProveedor } from '../lib/stock';
 import { guardarProveedor } from '../lib/datos';
+import { telefonoWhatsApp } from '../lib/pedido';
 import { Campo, Hoja, SelectorDias } from '../components/ui';
 import type { DiaSemana, Proveedor } from '../types';
 
 export function ProveedorForm({ proveedor, onCerrar }: { proveedor: Proveedor | null; onCerrar: () => void }) {
-  const { data, ejecutar, avisar, nuevoId } = useStore();
+  const { data, vistas, ejecutar, avisar, nuevoId } = useStore();
   const [nombre, setNombre] = useState(proveedor?.nombre ?? '');
+  const [telefono, setTelefono] = useState(proveedor?.telefono ?? '');
   const [dias, setDias] = useState<DiaSemana[]>(proveedor?.diasDeVisita ?? []);
   const [productoIds, setProductoIds] = useState<string[]>(proveedor ? productosDeProveedor(data, proveedor.id).map((p) => p.id) : []);
   const [errores, setErrores] = useState<Errores>({});
@@ -20,6 +22,9 @@ export function ProveedorForm({ proveedor, onCerrar }: { proveedor: Proveedor | 
     e.preventDefault();
     if (guardando) return;
     const err = validarProveedor({ nombre, diasDeVisita: dias });
+    if (vistas.tieneTelefono && telefono.trim() !== '' && !telefonoWhatsApp(telefono)) {
+      err.telefono = 'No parece un teléfono válido. Escribilo con código de área, por ejemplo 341 555-1234.';
+    }
     if (!err.nombre && data.proveedores.some((p) => p.id !== proveedor?.id && p.nombre.trim().toLowerCase() === nombre.trim().toLowerCase())) {
       err.nombre = 'Ya existe un proveedor con ese nombre.';
     }
@@ -27,9 +32,10 @@ export function ProveedorForm({ proveedor, onCerrar }: { proveedor: Proveedor | 
     if (Object.keys(err).length > 0) return;
     setGuardando(true);
     const r = await ejecutar(() => guardarProveedor(
-      { id: proveedor?.id ?? nuevoId('v'), nombre: nombre.trim(), diasDeVisita: [...dias].sort() as DiaSemana[] },
+      { id: proveedor?.id ?? nuevoId('v'), nombre: nombre.trim(), diasDeVisita: [...dias].sort() as DiaSemana[], telefono: telefono.trim() },
       !proveedor,
       productoIds,
+      vistas.tieneTelefono,
     ));
     setGuardando(false);
     if (!r.ok) {
@@ -55,6 +61,12 @@ export function ProveedorForm({ proveedor, onCerrar }: { proveedor: Proveedor | 
         <Campo etiqueta="Nombre" error={errores.nombre} htmlFor="prov-nombre">
           <input id="prov-nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej.: Distribuidora Norte" autoComplete="off" />
         </Campo>
+
+        {vistas.tieneTelefono && (
+          <Campo etiqueta="WhatsApp del proveedor (opcional)" error={errores.telefono} htmlFor="prov-telefono" ayuda="Para mandarle el pedido directo. Con código de área, por ejemplo 341 555-1234.">
+            <input id="prov-telefono" type="tel" inputMode="tel" value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="Ej.: 341 555-1234" autoComplete="off" />
+          </Campo>
+        )}
 
         <Campo etiqueta="Días de visita" error={errores.dias}>
           <SelectorDias valor={dias} onChange={(d) => { setDias(d); setErrores((x) => ({ ...x, dias: '' })); }} />

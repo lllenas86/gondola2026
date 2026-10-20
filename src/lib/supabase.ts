@@ -104,6 +104,14 @@ export const db = {
   async borrar(tabla: string, filtro: string): Promise<void> {
     await pedir(`/rest/v1/${tabla}?${filtro}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
   },
+  /** Llama a una función de la base (create function … en supabase/*.sql). */
+  async rpc<T>(funcion: string, parametros: object = {}): Promise<T> {
+    return (await pedir(`/rest/v1/rpc/${funcion}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parametros),
+    })) as T;
+  },
 };
 
 export const BUCKET_REMITOS = 'remitos';

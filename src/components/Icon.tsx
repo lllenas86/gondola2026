@@ -18,6 +18,10 @@ const PATHS = {
   camion: 'M3 6h11v10H3zM14 9h4l3 3v4h-7M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
   hoja: 'M12 3s7 4 7 11a7 7 0 0 1-14 0c0-7 7-11 7-11z',
   zoom: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-5-5M11 8v6M8 11h6',
+  enviar: 'M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z',
+  copiar: 'M9 9h11v12H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
+  reiniciar: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5',
+  carrito: 'M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h9.2a1 1 0 0 0 1-.8L20 8H6.2M9 20.5a1 1 0 1 0 0-.01M18 20.5a1 1 0 1 0 0-.01',
 } as const;
 
 export type IconName = keyof typeof PATHS;

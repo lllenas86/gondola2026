@@ -20,6 +20,8 @@ export interface Proveedor {
   id: string;
   nombre: string;
   diasDeVisita: DiaSemana[];
+  /** Teléfono para mandar el pedido por WhatsApp (opcional) */
+  telefono?: string;
 }
 
 /** Relación muchos a muchos: un producto puede venir de varios proveedores. */
@@ -120,8 +122,20 @@ export interface FilaVencimiento {
   diasParaVencer: number;
 }
 
+/** Un período entre dos conteos consecutivos (vista v_consumo_historico). */
+export interface FilaConsumo {
+  productoId: string;
+  /** Unidades consumidas en el período (puede ser negativo si faltó registrar una recepción) */
+  consumo: number;
+  /** Días del período */
+  dias: number;
+}
+
 export interface Vistas {
   stock: FilaStock[];
   visitas: FilaVisita[];
   vencimientos: FilaVencimiento[];
+  consumo: FilaConsumo[];
+  /** true si la base ya tiene la columna proveedores.telefono (supabase/03_pedido_y_demo.sql) */
+  tieneTelefono: boolean;
 }

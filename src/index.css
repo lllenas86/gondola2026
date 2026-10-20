@@ -369,3 +369,17 @@ img { max-width: 100%; display: block; }
 .item-simple > div { min-width: 0; }
 .btn-chico { min-height: 40px; padding: 6px 14px; font-size: 15px; flex-shrink: 0; }
 .btn:disabled { opacity: .6; cursor: default; }
+
+/* ---------- Pedido sugerido ---------- */
+.sugerido { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; font-size: 14px; font-weight: 600; color: var(--azul); }
+.sugerido strong { font-size: 15px; }
+.boton-pedido { margin-top: 10px; }
+.pedido-intro { font-size: 15px; margin-bottom: 10px; }
+.pedido-nota { margin-bottom: 12px; }
+.pedido-detalle { margin: 2px 0 8px; }
+.acciones-columna.sin-margen { margin-top: 0; }
+
+/* ---------- Restablecer demo ---------- */
+.tarjeta-reset { margin-top: 16px; }
+.tarjeta-reset .btn { margin-top: 10px; }
+.acciones-2.sin-margen-arriba { margin-top: 0; }

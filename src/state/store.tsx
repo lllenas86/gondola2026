@@ -35,7 +35,7 @@ interface Store {
 }
 
 const VACIO: AppData = { productos: [], proveedores: [], productoProveedor: [], conteos: [], recepciones: [], borradores: [] };
-const VISTAS_VACIAS: Vistas = { stock: [], visitas: [], vencimientos: [] };
+const VISTAS_VACIAS: Vistas = { stock: [], visitas: [], vencimientos: [], consumo: [], tieneTelefono: false };
 /** Cada cuánto se vuelve a leer la base para ver cambios hechos desde otro celular. */
 const REFRESCO_MS = 30_000;
 

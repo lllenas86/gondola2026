@@ -1,0 +1,5 @@
+{
+  "functions": {
+    "api/leer-remito.js": { "maxDuration": 60 }
+  }
+}

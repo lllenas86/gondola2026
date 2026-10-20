@@ -7,6 +7,7 @@ import { Icon } from '../components/Icon';
 import { EstadoConexion, Vacio } from '../components/ui';
 import { ProductoForm } from '../features/ProductoForm';
 import { ProveedorForm } from '../features/ProveedorForm';
+import { BotonRestablecerDemo } from '../features/RestablecerDemo';
 import type { Producto, Proveedor } from '../types';
 
 type Pestana = 'productos' | 'proveedores';
@@ -95,7 +96,7 @@ export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
                 <button type="button" className="item-catalogo" onClick={() => setEditandoProveedor(p)}>
                   <div>
                     <p className="item-titulo">{p.nombre}</p>
-                    <p className="texto-suave">Pasa: {formatDias(p.diasDeVisita) || '—'}</p>
+                    <p className="texto-suave">Pasa: {formatDias(p.diasDeVisita) || '—'}{p.telefono ? ` · Tel. ${p.telefono}` : ''}</p>
                     <p className="texto-suave">{prods.length} {prods.length === 1 ? 'producto' : 'productos'}{prods.length > 0 ? `: ${prods.map((x) => x.nombre).join(', ')}` : ''}</p>
                   </div>
                   <Icon name="lapiz" className="icono-suave" />
@@ -110,6 +111,8 @@ export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
         <Icon name="check" size={18} />
         <p>Tus datos se guardan en la nube (Supabase). Podés usar la app desde más de un celular.</p>
       </div>
+
+      <BotonRestablecerDemo />
 
       {editandoProducto && (
         <ProductoForm producto={editandoProducto === 'nuevo' ? null : editandoProducto} onCerrar={() => setEditandoProducto(null)} />

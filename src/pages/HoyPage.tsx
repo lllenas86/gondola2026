@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { useStore } from '../state/store';
 import { cuandoEs, DIAS_LARGOS, formatFechaCorta, haceCuanto, parseIsoDate, startOfDay, textoVisita } from '../lib/dates';
 import { calcularStock, diasParaVencer, productosDeProveedor, proveedoresDeProducto, proximaVisita, DIAS_SIN_CONTEO } from '../lib/stock';
 import { irA } from '../lib/router';
 import { Icon } from '../components/Icon';
 import { EstadoConexion, Vacio } from '../components/ui';
+import { PedidoHoja } from '../features/PedidoHoja';
+import { sugerenciaProducto, ventanaDePedido } from '../lib/pedido';
 import type { AppData, FilaStock, Producto, Proveedor } from '../types';
 
 // Pantalla de inicio. De arriba hacia abajo:
@@ -60,6 +63,7 @@ function armarFaltantes(data: AppData, filas: FilaStock[], hoy: Date): GrupoFalt
 
 export function HoyPage() {
   const { data, vistas } = useStore();
+  const [pedidoDe, setPedidoDe] = useState<Proveedor | null>(null);
   const ahora = new Date();
   const hoy = startOfDay(ahora);
 
@@ -101,7 +105,7 @@ export function HoyPage() {
         {faltantes.length === 0 ? (
           <TodoEnOrden />
         ) : (
-          faltantes.map((g) => <TarjetaFalta key={g.visita?.proveedor.id ?? 'sin'} grupo={g} ahora={ahora} />)
+          faltantes.map((g) => <TarjetaFalta key={g.visita?.proveedor.id ?? 'sin'} grupo={g} ahora={ahora} onPedido={setPedidoDe} />)
         )}
       </section>
 
@@ -114,7 +118,7 @@ export function HoyPage() {
           </Vacio>
         ) : (
           pasan.map(({ fila, proveedor }) => (
-            <TarjetaProveedor key={proveedor.id} proveedor={proveedor} cuando={fila.diasHasta === 0 ? 'Pasa hoy' : 'Pasa mañana'} data={data} ahora={ahora} />
+            <TarjetaProveedor key={proveedor.id} proveedor={proveedor} cuando={fila.diasHasta === 0 ? 'Pasa hoy' : 'Pasa mañana'} data={data} ahora={ahora} onPedido={setPedidoDe} />
           ))
         )}
       </section>
@@ -167,6 +171,8 @@ export function HoyPage() {
           </ul>
         )}
       </section>
+
+      {pedidoDe && <PedidoHoja key={pedidoDe.id} proveedor={pedidoDe} onCerrar={() => setPedidoDe(null)} />}
     </>
   );
 }
@@ -196,8 +202,10 @@ function ProximaVisita() {
   );
 }
 
-function TarjetaFalta({ grupo, ahora }: { grupo: GrupoFalta; ahora: Date }) {
+function TarjetaFalta({ grupo, ahora, onPedido }: { grupo: GrupoFalta; ahora: Date; onPedido: (p: Proveedor) => void }) {
+  const { data, vistas } = useStore();
   const { visita } = grupo;
+  const ventana = visita ? ventanaDePedido(visita.proveedor, startOfDay(ahora)) : null;
   return (
     <article className="tarjeta tarjeta-falta">
       <div className="tarjeta-cabecera">
@@ -217,6 +225,7 @@ function TarjetaFalta({ grupo, ahora }: { grupo: GrupoFalta; ahora: Date }) {
               <p className="texto-suave">
                 Stock {fila.stockActual ?? '—'} / punto de pedido {fila.puntoPedido}
               </p>
+              {ventana && <CantidadSugerida cantidad={sugerenciaProducto(data, vistas, producto, ventana).cantidad} />}
               {otros.length > 0 && (
                 <p className="texto-suave">
                   También lo trae {otros.map((o) => `${o.proveedor.nombre} (${textoVisita(o.fecha, ahora)})`).join(', ')}
@@ -231,9 +240,14 @@ function TarjetaFalta({ grupo, ahora }: { grupo: GrupoFalta; ahora: Date }) {
         ))}
       </ul>
       {visita ? (
-        <button type="button" className="btn btn-primario btn-bloque" onClick={() => irA('contar', { proveedor: visita.proveedor.id })}>
-          <Icon name="contar" /> Contar productos de este proveedor
-        </button>
+        <div className="acciones-2">
+          <button type="button" className="btn btn-secundario" onClick={() => irA('contar', { proveedor: visita.proveedor.id })}>
+            <Icon name="contar" /> Contar
+          </button>
+          <button type="button" className="btn btn-primario" onClick={() => onPedido(visita.proveedor)}>
+            <Icon name="carrito" /> Pedido
+          </button>
+        </div>
       ) : (
         <button type="button" className="btn btn-secundario btn-bloque" onClick={() => irA('catalogo')}>
           Asignar proveedor en Catálogo
@@ -243,8 +257,9 @@ function TarjetaFalta({ grupo, ahora }: { grupo: GrupoFalta; ahora: Date }) {
   );
 }
 
-function TarjetaProveedor({ proveedor, cuando, data, ahora }: { proveedor: Proveedor; cuando: string; data: AppData; ahora: Date }) {
+function TarjetaProveedor({ proveedor, cuando, data, ahora, onPedido }: { proveedor: Proveedor; cuando: string; data: AppData; ahora: Date; onPedido: (p: Proveedor) => void }) {
   const productos = productosDeProveedor(data, proveedor.id);
+  const ventana = ventanaDePedido(proveedor, startOfDay(ahora));
   return (
     <article className="tarjeta">
       <div className="tarjeta-cabecera">
@@ -261,19 +276,31 @@ function TarjetaProveedor({ proveedor, cuando, data, ahora }: { proveedor: Prove
       ) : (
         <ul className="lista-stock">
           {productos.map((prod) => (
-            <FilaStockProducto key={prod.id} producto={prod} data={data} ahora={ahora} />
+            <FilaStockProducto key={prod.id} producto={prod} data={data} ahora={ahora} ventana={ventana} />
           ))}
         </ul>
       )}
       <button type="button" className="btn btn-primario btn-bloque" onClick={() => irA('contar', { proveedor: proveedor.id })}>
         <Icon name="contar" /> Contar productos de este proveedor
       </button>
+      {productos.length > 0 && (
+        <button type="button" className="btn btn-secundario btn-bloque boton-pedido" onClick={() => onPedido(proveedor)}>
+          <Icon name="carrito" /> Armar pedido y enviarlo
+        </button>
+      )}
     </article>
   );
 }
 
-function FilaStockProducto({ producto, data, ahora }: { producto: Producto; data: AppData; ahora: Date }) {
+/** "Pedir 12" debajo del stock. No se muestra si no hace falta pedir. */
+function CantidadSugerida({ cantidad }: { cantidad: number }) {
+  if (cantidad <= 0) return null;
+  return <p className="sugerido"><Icon name="carrito" size={15} /> Sugerido: pedir <strong>{cantidad}</strong></p>;
+}
+
+function FilaStockProducto({ producto, data, ahora, ventana }: { producto: Producto; data: AppData; ahora: Date; ventana: ReturnType<typeof ventanaDePedido> }) {
   const { vistas } = useStore();
+  const sugerido = ventana ? sugerenciaProducto(data, vistas, producto, ventana).cantidad : 0;
   const s = calcularStock(data, producto, ahora);
   const fila = vistas.stock.find((f) => f.productoId === producto.id);
   // El stock y las marcas salen de la vista v_stock_actual; el detalle del último conteo, del historial.
@@ -292,6 +319,7 @@ function FilaStockProducto({ producto, data, ahora }: { producto: Producto; data
             : 'Nunca se contó'}
           {s.recibidoDespues > 0 && ` · +${s.recibidoDespues} recibidos`}
         </p>
+        <CantidadSugerida cantidad={sugerido} />
         <div className="etiquetas">
           {bajo && <span className="etiqueta etiqueta-rojo">Pedir · punto {producto.puntoDePedido}</span>}
           {desactualizado && (
