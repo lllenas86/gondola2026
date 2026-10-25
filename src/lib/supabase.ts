@@ -15,8 +15,11 @@ function leerEnv(...nombres: string[]): string {
   return '';
 }
 
-export const SUPABASE_URL = leerEnv('NEXT_PUBLIC_SUPABASE_URL', 'VITE_SUPABASE_URL').replace(/\/+$/, '');
-const SUPABASE_KEY = leerEnv(
+export const SUPABASE_KEY_PUBLICA = () => SUPABASE_KEY;
+// En MODO DEMO nunca se usan las variables reales: todo va a la base de prueba del navegador (src/demo/backend.ts).
+const MODO_DEMO = import.meta.env.VITE_DEMO === '1';
+export const SUPABASE_URL = MODO_DEMO ? 'https://demo.gondola.invalid' : leerEnv('NEXT_PUBLIC_SUPABASE_URL', 'VITE_SUPABASE_URL').replace(/\/+$/, '');
+const SUPABASE_KEY = MODO_DEMO ? 'demo-sin-clave' : leerEnv(
   'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',
   'VITE_SUPABASE_PUBLISHABLE_KEY',
@@ -36,14 +39,26 @@ export class ErrorBase extends Error {
   }
 }
 
+/** Token de la sesión iniciada (lib/auth.ts lo actualiza). Sin sesión, se usa la clave pública. */
+let tokenSesion: string | null = null;
+export function usarToken(t: string | null) {
+  tokenSesion = t;
+}
+/** Se llama cuando la base responde que el token venció; devuelve true si lo pudo renovar. */
+let renovarToken: (() => Promise<boolean>) | null = null;
+export function alVencerToken(fn: () => Promise<boolean>) {
+  renovarToken = fn;
+}
+
 function encabezados(extra?: Record<string, string>): Record<string, string> {
-  // Las claves nuevas (sb_publishable_…) no son JWT: van solo en el encabezado apikey.
-  // Las claves anon antiguas (eyJ…) además se mandan como Authorization.
+  // Con sesión iniciada, el token del usuario va en Authorization (así la base aplica sus permisos).
+  // Sin sesión: las claves nuevas (sb_publishable_…) van solo en apikey; las anon antiguas (eyJ…) también en Authorization.
+  if (tokenSesion) return { apikey: SUPABASE_KEY, Authorization: `Bearer ${tokenSesion}`, ...extra };
   const esJwt = SUPABASE_KEY.startsWith('eyJ');
   return { apikey: SUPABASE_KEY, ...(esJwt ? { Authorization: `Bearer ${SUPABASE_KEY}` } : {}), ...extra };
 }
 
-async function pedir(path: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<unknown> {
+async function pedir(path: string, init: RequestInit & { headers?: Record<string, string> } = {}, reintento = true): Promise<unknown> {
   if (!hayConfiguracion) {
     throw new ErrorBase('config', '', 'La app no tiene configurada la conexión con la base (faltan las variables de Supabase en Vercel).');
   }
@@ -64,6 +79,10 @@ async function pedir(path: string, init: RequestInit & { headers?: Record<string
   }
   if (!res.ok) {
     const c = (cuerpo && typeof cuerpo === 'object' ? cuerpo : {}) as { code?: string; message?: string; error?: string };
+    // Token vencido: se renueva una vez y se repite el pedido
+    if (reintento && tokenSesion && renovarToken && (res.status === 401 || c.code === 'PGRST301' || /jwt expired/i.test(c.message ?? ''))) {
+      if (await renovarToken()) return pedir(path, init, false);
+    }
     // 5xx de la puerta de enlace (proyecto pausado, caída): se trata como sin conexión
     const tipo = res.status >= 500 && !c.code ? 'red' : 'base';
     throw new ErrorBase(tipo, c.code ?? String(res.status), c.message ?? c.error ?? `Error ${res.status}`);

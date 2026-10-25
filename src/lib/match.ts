@@ -1,4 +1,5 @@
-import type { Producto } from '../types';
+import type { AliasRemito, Presentacion } from '../types';
+import { nombreItem, type Item } from './inventario';
 
 /** Umbrales de confianza para vincular una línea del remito con el catálogo. */
 export const CONFIANZA_ALTA = 0.75;
@@ -83,20 +84,84 @@ export function similitud(descripcion: string, nombreProducto: string): number {
 }
 
 export interface Vinculo {
-  productoId: string | null;
+  presentacionId: string | null;
   confianza: number;
+  /** Por qué conviene revisarla aunque se haya encontrado un candidato */
+  motivo?: string;
 }
 
-/** Busca el producto del catálogo más parecido. Da prioridad a los productos del proveedor. */
-export function vincularLinea(descripcion: string, productos: Producto[], idsDelProveedor: Set<string> = new Set()): Vinculo {
-  let mejor: Vinculo = { productoId: null, confianza: 0 };
-  for (const p of productos) {
-    let s = similitud(descripcion, p.nombre);
-    if (idsDelProveedor.has(p.id)) s = Math.min(1, s + 0.05);
-    if (s > mejor.confianza) mejor = { productoId: p.id, confianza: s };
+/** Texto del remito normalizado para recordarlo como alias. */
+export function normalizarAlias(texto: string): string {
+  return normalizar(texto).join(' ');
+}
+
+/** Tamaño normalizado ("0_5 l", "190 g") de un texto, o null si no tiene. */
+export function medidaDe(texto: string): string | null {
+  const t = normalizar(texto);
+  for (let i = 0; i < t.length - 1; i++) {
+    if (/^\d/.test(t[i]) && ['l', 'ml', 'kg', 'g'].includes(t[i + 1])) return `${t[i]} ${t[i + 1]}`;
   }
-  if (mejor.confianza < CONFIANZA_MINIMA) return { productoId: null, confianza: mejor.confianza };
-  return mejor;
+  return null;
+}
+
+/** Tamaño de una presentación: el configurado, o el que figura en su nombre o en el del producto. */
+export function medidaPresentacion(it: Item): string | null {
+  const x = it.presentacion;
+  if (x.contenido !== undefined && x.unidadContenido && x.unidadContenido !== 'u') {
+    return medidaDe(`${String(x.contenido).replace('.', ',')} ${x.unidadContenido}`);
+  }
+  return medidaDe(x.nombre) ?? medidaDe(it.producto.nombre);
+}
+
+/** Tope de confianza cuando hay que revisar (queda por debajo de CONFIANZA_ALTA). */
+const TOPE_REVISAR = 0.6;
+
+/**
+ * Busca la presentación del catálogo que corresponde a una línea del remito.
+ *   1. Si ese texto ya se vinculó a mano antes (alias), se usa esa.
+ *   2. Se compara el nombre del producto y el TAMAÑO: si el remito dice 500 cc y la
+ *      presentación es de 2,25 L, no se vincula con confianza alta.
+ *   3. Si el remito no dice tamaño y el producto tiene varias presentaciones, queda para revisar.
+ * Da prioridad a las presentaciones que trae el proveedor.
+ */
+export function vincularLinea(
+  descripcion: string,
+  items: Item[],
+  idsDelProveedor: Set<string> = new Set(),
+  alias: AliasRemito[] = [],
+): Vinculo {
+  const clave = normalizarAlias(descripcion);
+  const a = alias.find((x) => x.texto === clave && items.some((it) => it.presentacion.id === x.presentacionId));
+  if (a) return { presentacionId: a.presentacionId, confianza: 1 };
+
+  const medidaRemito = medidaDe(descripcion);
+  const presentacionesPorProducto = new Map<string, number>();
+  for (const it of items) presentacionesPorProducto.set(it.producto.id, (presentacionesPorProducto.get(it.producto.id) ?? 0) + 1);
+
+  let mejor: Vinculo & { base: number } = { presentacionId: null, confianza: 0, base: 0 };
+  for (const it of items) {
+    const medida = medidaPresentacion(it);
+    const nombre = nombreItem(it.producto, it.presentacion);
+    let s = similitud(descripcion, medida && !medidaDe(nombre) ? `${nombre} ${medida.replace('_', ',')}` : nombre);
+    if (idsDelProveedor.has(it.presentacion.id)) s = Math.min(1, s + 0.05);
+    let motivo: string | undefined;
+    if (medidaRemito && medida) {
+      if (medidaRemito === medida) s = Math.min(1, s + 0.05);
+      else if (s < 0.7) {
+        // Tamaño distinto y nombre poco parecido: no se sugiere (evita "Fanta" → "Gaseosa naranja")
+        s = 0;
+      } else {
+        s = Math.min(s, TOPE_REVISAR);
+        motivo = 'El tamaño del remito no coincide con esta presentación.';
+      }
+    } else if (!medidaRemito && (presentacionesPorProducto.get(it.producto.id) ?? 0) > 1) {
+      s = Math.min(s, TOPE_REVISAR);
+      motivo = 'El remito no indica el tamaño y el producto tiene varias presentaciones.';
+    }
+    if (s > mejor.confianza) mejor = { presentacionId: it.presentacion.id, confianza: s, base: s, ...(motivo ? { motivo } : {}) };
+  }
+  if (mejor.confianza < CONFIANZA_MINIMA) return { presentacionId: null, confianza: mejor.confianza };
+  return { presentacionId: mejor.presentacionId, confianza: Math.round(mejor.confianza * 100) / 100, ...(mejor.motivo ? { motivo: mejor.motivo } : {}) };
 }
 
 /** Proveedor más parecido al nombre leído en el remito. */
@@ -108,3 +173,5 @@ export function vincularProveedor(nombre: string, proveedores: { id: string; nom
   }
   return mejor.s >= 0.5 ? mejor.id : null;
 }
+
+export type { Presentacion };

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useStore } from '../state/store';
 import { validarProveedor, type Errores } from '../lib/validation';
-import { productosDeProveedor } from '../lib/stock';
+import { itemsActivos, itemsDeProveedor, nombreItem } from '../lib/inventario';
 import { guardarProveedor } from '../lib/datos';
 import { telefonoWhatsApp } from '../lib/pedido';
 import { Campo, Hoja, SelectorDias } from '../components/ui';
@@ -12,11 +12,11 @@ export function ProveedorForm({ proveedor, onCerrar }: { proveedor: Proveedor | 
   const [nombre, setNombre] = useState(proveedor?.nombre ?? '');
   const [telefono, setTelefono] = useState(proveedor?.telefono ?? '');
   const [dias, setDias] = useState<DiaSemana[]>(proveedor?.diasDeVisita ?? []);
-  const [productoIds, setProductoIds] = useState<string[]>(proveedor ? productosDeProveedor(data, proveedor.id).map((p) => p.id) : []);
+  const [productoIds, setProductoIds] = useState<string[]>(proveedor ? itemsDeProveedor(data, proveedor.id).map((it) => it.presentacion.id) : []);
   const [errores, setErrores] = useState<Errores>({});
   const [guardando, setGuardando] = useState(false);
 
-  const productos = [...data.productos].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const productos = itemsActivos(data).map((it) => ({ id: it.presentacion.id, nombre: nombreItem(it.producto, it.presentacion) }));
 
   const guardar = async (e: FormEvent) => {
     e.preventDefault();
@@ -73,7 +73,7 @@ export function ProveedorForm({ proveedor, onCerrar }: { proveedor: Proveedor | 
         </Campo>
 
         <fieldset className="checklist">
-          <legend>Productos que trae ({productoIds.length})</legend>
+          <legend>Presentaciones que trae ({productoIds.length})</legend>
           {productos.length === 0 && <p className="texto-suave">Todavía no hay productos en el catálogo.</p>}
           {productos.map((p) => (
             <label key={p.id} className="check-item">

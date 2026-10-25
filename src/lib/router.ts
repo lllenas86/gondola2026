@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 
-// Navegación con el "#" de la URL (#/contar?proveedor=…).
+// Navegación con el "#" de la URL (#/contar?…).
 // No necesita librerías ni configuración en Vercel, y recargar la página nunca da 404.
 
-export type Seccion = 'hoy' | 'contar' | 'recepcion' | 'catalogo';
-const SECCIONES: Seccion[] = ['hoy', 'contar', 'recepcion', 'catalogo'];
+export type Seccion =
+  | 'hoy' | 'contar' | 'recepcion' | 'vencimientos' | 'proyeccion' | 'pedidos' | 'catalogo' | 'panel' | 'equipo' | 'mas';
+const SECCIONES: Seccion[] = ['hoy', 'contar', 'recepcion', 'vencimientos', 'proyeccion', 'pedidos', 'catalogo', 'panel', 'equipo', 'mas'];
 
 export interface Ruta {
   seccion: Seccion;

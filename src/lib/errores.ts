@@ -1,4 +1,5 @@
 import { ErrorBase } from './supabase';
+import { FaltaMigracion } from './datos';
 
 /** Mensaje para mostrar en pantalla y, si corresponde, el campo del formulario al que se refiere. */
 export interface MensajeError {
@@ -22,10 +23,18 @@ const POR_RESTRICCION: Record<string, MensajeError> = {
   conteos_cantidad_no_negativa: { texto: 'La cantidad contada no puede ser negativa.', campo: 'cantidad' },
   lineas_cantidad_positiva: { texto: 'Cada producto recibido tiene que tener una cantidad mayor a 0.', campo: 'cantidad' },
   lineas_vinculada_con_producto: { texto: 'Hay líneas del remito sin producto asignado.' },
+  presentaciones_nombre_unico: { texto: 'Ese producto ya tiene una presentación con ese nombre.', campo: 'nombre' },
+  presentaciones_nombre_no_vacio: { texto: 'Escribí el nombre de la presentación (por ejemplo, 1 L).', campo: 'nombre' },
+  presentaciones_contenido_completo: { texto: 'Indicá el tamaño y su unidad, o dejá los dos vacíos.' },
+  presentaciones_bulto_positivo: { texto: 'Las unidades por bulto tienen que ser mayores a 0.' },
+  presentaciones_costo_no_negativo: { texto: 'El costo no puede ser negativo.' },
+  devolucion_lineas_cantidad_positiva: { texto: 'Cada producto devuelto tiene que tener una cantidad mayor a 0.', campo: 'cantidad' },
+  bajas_cantidad_positiva: { texto: 'La cantidad dada de baja tiene que ser mayor a 0.', campo: 'cantidad' },
 };
 
 /** Traduce cualquier error de la base a un mensaje para el usuario. */
 export function mensajeError(e: unknown): MensajeError {
+  if (e instanceof FaltaMigracion) return { texto: e.message, sinConexion: true };
   if (e instanceof ErrorBase) {
     if (e.tipo === 'red') return { texto: TEXTO_SIN_CONEXION, sinConexion: true };
     if (e.tipo === 'config') return { texto: e.message, sinConexion: true };
@@ -37,14 +46,14 @@ export function mensajeError(e: unknown): MensajeError {
     }
     // Función o columna nueva que todavía no se creó en la base
     if (e.codigo === 'PGRST202' || e.codigo === 'PGRST204' || e.codigo === '42883' || e.codigo === '42703') {
-      return { texto: 'Falta actualizar la base: corré supabase/03_pedido_y_demo.sql en Supabase → SQL Editor.' };
+      return { texto: 'Falta actualizar la base: corré los archivos de supabase/ que falten (03, 04) en Supabase → SQL Editor.' };
     }
     for (const [restriccion, msg] of Object.entries(POR_RESTRICCION)) {
       if (e.message.includes(restriccion)) return msg;
     }
     // Reglas de los triggers: ya vienen en castellano
     if (e.codigo === 'P0001') return { texto: e.message };
-    if (e.codigo === '42501') return { texto: 'La base no permite esta operación.' };
+    if (e.codigo === '42501') return { texto: 'Tu usuario no tiene permiso para esta operación.' };
     if (e.codigo === '23503') return { texto: 'El dato al que hace referencia ya no existe. Recargá la pantalla.' };
     return { texto: `La base rechazó el cambio. Revisá los datos e intentá de nuevo. (Detalle: ${e.codigo} · ${e.message.slice(0, 120)})` };
   }

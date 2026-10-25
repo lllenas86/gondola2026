@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
-import { CONFIANZA_ALTA, vincularLinea, vincularProveedor } from '../lib/match';
+import { CONFIANZA_ALTA, medidaDe, vincularLinea, vincularProveedor } from '../lib/match';
 import { leerNumero, validarRecepcion, type LineaBorrador } from '../lib/validation';
-import { calcularStock, productosDeProveedor } from '../lib/stock';
+import { itemDe, itemsActivos, itemsDeProveedor, nombreItem, stockDe, type Item } from '../lib/inventario';
 import { confirmarRecepcion, type LineaAConfirmar } from '../lib/datos';
 import { isoDate } from '../lib/dates';
 import { Icon } from '../components/Icon';
 import { Campo, EstadoConexion } from '../components/ui';
-import { ProductoForm } from './ProductoForm';
-import type { AppData, Borrador, Producto } from '../types';
+import { AltaProducto } from './ProductoFicha';
+import type { AliasRemito, AppData, Borrador } from '../types';
 
 export interface ResultadoConfirmacion {
   proveedor: string;
@@ -31,25 +31,29 @@ let claveLinea = 0;
 const nuevaClave = () => `l${++claveLinea}`;
 
 function lineaVacia(): LineaBorrador {
-  return { key: nuevaClave(), descripcion: '', productoId: null, cantidad: '', fechaVencimiento: '', revisar: false, ignorada: false };
+  return { key: nuevaClave(), descripcion: '', presentacionId: null, cantidad: '', fechaVencimiento: '', revisar: false, ignorada: false };
 }
 
 function armarBorrador(data: AppData, borrador: Borrador | undefined) {
   if (!borrador) return { proveedorId: '', fecha: isoDate(new Date()), lineas: [lineaVacia()] };
   const proveedorId = borrador.proveedorId ?? vincularProveedor(borrador.proveedorTexto ?? '', data.proveedores) ?? '';
-  const ids = new Set(proveedorId ? productosDeProveedor(data, proveedorId).map((p) => p.id) : []);
+  const ids = new Set(proveedorId ? itemsDeProveedor(data, proveedorId).map((it) => it.presentacion.id) : []);
+  const items = itemsActivos(data);
   const lineas: LineaBorrador[] = borrador.lineas.map((l) => {
-    // Si la línea no quedó vinculada, se intenta de nuevo con el catálogo actual
-    const v = l.productoId ? { productoId: l.productoId, confianza: l.confianzaVinculo ?? 1 } : vincularLinea(l.descripcion, data.productos, ids);
+    // Si la línea no quedó vinculada, se intenta de nuevo con el catálogo actual (y los alias aprendidos)
+    const v = l.presentacionId
+      ? { presentacionId: l.presentacionId, confianza: l.confianzaVinculo ?? 1, motivo: l.motivoRevision }
+      : vincularLinea(l.descripcion, items, ids, data.alias);
     const confianza = Math.min(v.confianza, l.confianza ?? 1);
     return {
       key: nuevaClave(),
       descripcion: l.descripcion,
-      productoId: v.productoId,
+      presentacionId: v.presentacionId,
       cantidad: l.cantidad === null || l.cantidad === undefined ? '' : String(l.cantidad),
       fechaVencimiento: l.fechaVencimiento ?? '',
       confianza,
-      revisar: !v.productoId || confianza < CONFIANZA_ALTA,
+      ...(v.motivo ? { motivoRevision: v.motivo } : {}),
+      revisar: !v.presentacionId || confianza < CONFIANZA_ALTA,
       ignorada: false,
     };
   });
@@ -62,7 +66,7 @@ function tituloDesdeRemito(desc: string): string {
 }
 
 export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onConfirmada, onCancelar }: Props) {
-  const { data, ejecutar } = useStore();
+  const { data, vistas, ejecutar, puede } = useStore();
   const inicial = useMemo(() => armarBorrador(data, borrador), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [guardando, setGuardando] = useState(false);
   const [proveedorId, setProveedorId] = useState(inicial.proveedorId);
@@ -71,12 +75,16 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
   const [creandoPara, setCreandoPara] = useState<LineaBorrador | null>(null);
+  /** Líneas cargadas en bultos (solo presentaciones con equivalencia configurada) */
+  const [enBultos, setEnBultos] = useState<Record<string, boolean>>({});
+  /** Vinculación inicial de cada línea, para saber cuáles se corrigieron a mano */
+  const [inicialPorLinea] = useState(() => new Map(inicial.lineas.map((l) => [l.key, { id: l.presentacionId, revisar: l.revisar }])));
   const [fotoGrande, setFotoGrande] = useState(false);
   const hoy = isoDate(new Date());
 
-  const delProveedor = proveedorId ? productosDeProveedor(data, proveedorId) : [];
-  const idsDelProveedor = new Set(delProveedor.map((p) => p.id));
-  const otros = [...data.productos].filter((p) => !idsDelProveedor.has(p.id)).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const delProveedor: Item[] = proveedorId ? itemsDeProveedor(data, proveedorId) : [];
+  const idsDelProveedor = new Set(delProveedor.map((it) => it.presentacion.id));
+  const otros = itemsActivos(data).filter((it) => !idsDelProveedor.has(it.presentacion.id));
 
   const cambiarLinea = (key: string, cambio: Partial<LineaBorrador>, marcarRevisada = true) => {
     setLineas((ls) => ls.map((l) => (l.key === key ? { ...l, ...cambio, ...(marcarRevisada ? { revisar: false } : {}) } : l)));
@@ -84,41 +92,59 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
     setErrorGeneral(null);
   };
 
-  const pendientes = lineas.filter((l) => !l.ignorada && !l.productoId).length;
+  const pendientes = lineas.filter((l) => !l.ignorada && !l.presentacionId).length;
   const aRevisar = lineas.filter((l) => !l.ignorada && l.revisar).length;
 
   const confirmar = async () => {
     if (guardando) return;
-    const r = validarRecepcion(proveedorId, fecha, lineas, hoy);
+    // Las líneas en bultos se pasan a unidades con la equivalencia configurada (nunca se supone)
+    const lineasUnidades = lineas.map((l) => {
+      const x = l.presentacionId ? itemDe(data, l.presentacionId)?.presentacion : undefined;
+      const n = leerNumero(l.cantidad);
+      return enBultos[l.key] && x?.unidadesPorBulto && typeof n === 'number' ? { ...l, cantidad: String(n * x.unidadesPorBulto) } : l;
+    });
+    const r = validarRecepcion(proveedorId, fecha, lineasUnidades, hoy);
     setErrores(r.errores);
     setErrorGeneral(r.errorGeneral);
     if (r.errorGeneral || Object.keys(r.errores).length > 0) {
       document.querySelector('.con-error, .campo-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
-    // Se agrupan líneas repetidas del mismo producto.
-    const agrupadas = new Map<string, { cantidad: number; fechaVencimiento?: string }>();
-    for (const l of r.lineas) {
-      const prev = agrupadas.get(l.productoId);
-      agrupadas.set(l.productoId, {
+    // Se agrupan las líneas repetidas de la MISMA presentación y el MISMO vencimiento
+    // (vencimientos distintos son lotes distintos: no se mezclan).
+    const agrupadas = new Map<string, { presentacionId: string; cantidad: number; fechaVencimiento?: string; descripcion?: string }>();
+    for (const [i, l] of r.lineas.entries()) {
+      const clave = `${l.presentacionId}|${l.fechaVencimiento ?? ''}`;
+      const prev = agrupadas.get(clave);
+      const desc = lineasUnidades.filter((x) => !x.ignorada && x.presentacionId)[i]?.descripcion;
+      agrupadas.set(clave, {
+        presentacionId: l.presentacionId,
         cantidad: (prev?.cantidad ?? 0) + l.cantidad,
-        fechaVencimiento: [prev?.fechaVencimiento, l.fechaVencimiento].filter(Boolean).sort()[0],
+        ...(l.fechaVencimiento ? { fechaVencimiento: l.fechaVencimiento } : {}),
+        ...(prev?.descripcion ?? desc ? { descripcion: prev?.descripcion ?? desc } : {}),
       });
     }
     const lineasConfirmar: LineaAConfirmar[] = [
-      ...[...agrupadas].map(([productoId, v]) => ({ productoId, cantidad: v.cantidad, ...(v.fechaVencimiento ? { fechaVencimiento: v.fechaVencimiento } : {}) })),
+      ...[...agrupadas.values()].map((v) => ({ presentacionId: v.presentacionId, cantidad: v.cantidad, ...(v.descripcion ? { descripcion: v.descripcion } : {}), ...(v.fechaVencimiento ? { fechaVencimiento: v.fechaVencimiento } : {}) })),
       // Las líneas ignoradas quedan registradas (no suman al stock)
       ...lineas
         .filter((l) => l.ignorada && l.descripcion)
-        .map((l) => ({ productoId: null, descripcion: l.descripcion, cantidad: Number(leerNumero(l.cantidad)) || 0, ignorada: true })),
+        .map((l) => ({ presentacionId: null, descripcion: l.descripcion, cantidad: Number(leerNumero(l.cantidad)) || 0, ignorada: true })),
     ];
 
-    const antes = new Map([...agrupadas.keys()].map((id) => {
-      const p = data.productos.find((x) => x.id === id) as Producto;
-      return [id, calcularStock(data, p).stock];
-    }));
-    // Si el proveedor trajo un producto que no tenía asociado, se asocia.
-    const asociar = [...agrupadas.keys()].filter((id) => !idsDelProveedor.has(id));
+    const porPresentacion = new Map<string, number>();
+    for (const v of agrupadas.values()) porPresentacion.set(v.presentacionId, (porPresentacion.get(v.presentacionId) ?? 0) + v.cantidad);
+    const antes = new Map([...porPresentacion.keys()].map((id) => [id, stockDe(data, vistas, id)]));
+    // Si el proveedor trajo una presentación que no tenía asociada, se asocia.
+    const asociar = [...porPresentacion.keys()].filter((id) => !idsDelProveedor.has(id));
+    // Textos del remito que la persona vinculó o corrigió a mano: se recuerdan
+    const aprender: AliasRemito[] = lineas
+      .filter((l) => !l.ignorada && l.presentacionId && l.descripcion)
+      .filter((l) => {
+        const ini = inicialPorLinea.get(l.key);
+        return !ini || ini.revisar || ini.id !== l.presentacionId;
+      })
+      .map((l) => ({ texto: l.descripcion, presentacionId: l.presentacionId as string }));
     const proveedor = data.proveedores.find((p) => p.id === proveedorId);
 
     setGuardando(true);
@@ -130,6 +156,7 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
       imagenPath: imagenPath ?? null,
       lineas: lineasConfirmar,
       asociar,
+      aprender,
     }));
     setGuardando(false);
     if (!res.ok) {
@@ -140,13 +167,14 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
 
     onConfirmada({
       proveedor: proveedor?.nombre ?? '',
-      cambios: [...agrupadas].map(([id, v]) => {
+      cambios: [...porPresentacion].map(([id, cantidad]) => {
         const a = antes.get(id) ?? null;
+        const it = itemDe(data, id);
         return {
-          nombre: data.productos.find((p) => p.id === id)?.nombre ?? '',
+          nombre: it ? nombreItem(it.producto, it.presentacion) : '',
           antes: a,
-          despues: (a ?? 0) + v.cantidad,
-          recibido: v.cantidad,
+          despues: (a ?? 0) + cantidad,
+          recibido: cantidad,
         };
       }),
     });
@@ -205,7 +233,9 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
           <h2 className="seccion-titulo">Productos recibidos</h2>
           <ul className="lineas">
             {lineas.map((l, i) => {
-              const producto = data.productos.find((p) => p.id === l.productoId);
+              const item = l.presentacionId ? itemDe(data, l.presentacionId) : null;
+              const producto = item?.producto;
+              const bultos = item?.presentacion.unidadesPorBulto;
               const errProd = errores[`${l.key}.producto`];
               const errCant = errores[`${l.key}.cantidad`];
               if (l.ignorada) {
@@ -225,33 +255,37 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
                   )}
                   {l.revisar && (
                     <p className="linea-aviso">
-                      {!l.productoId
-                        ? 'No encontramos este producto en el catálogo. Elegilo, crealo o ignorá la línea.'
-                        : `Revisá producto y cantidad: la IA no está segura (confianza ${Math.round((l.confianza ?? 0) * 100)} %).`}
+                      {!l.presentacionId
+                        ? 'No encontramos esta presentación en el catálogo. Elegila, creala o ignorá la línea.'
+                        : l.motivoRevision
+                          ? `${l.motivoRevision} Confirmá la presentación.`
+                          : `Revisá presentación y cantidad: la IA no está segura (confianza ${Math.round((l.confianza ?? 0) * 100)} %).`}
                     </p>
                   )}
 
-                  <Campo etiqueta="Producto" error={errProd} htmlFor={`prod-${l.key}`}>
-                    <select id={`prod-${l.key}`} value={l.productoId ?? ''} onChange={(e) => cambiarLinea(l.key, { productoId: e.target.value || null })}>
+                  <Campo etiqueta="Producto y presentación" error={errProd} htmlFor={`prod-${l.key}`}>
+                    <select id={`prod-${l.key}`} value={l.presentacionId ?? ''} onChange={(e) => { cambiarLinea(l.key, { presentacionId: e.target.value || null, motivoRevision: undefined }); setEnBultos((b) => ({ ...b, [l.key]: false })); }}>
                       <option value="">Sin asignar</option>
                       {delProveedor.length > 0 && (
                         <optgroup label="De este proveedor">
-                          {delProveedor.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                          {delProveedor.map((it) => <option key={it.presentacion.id} value={it.presentacion.id}>{nombreItem(it.producto, it.presentacion)}</option>)}
                         </optgroup>
                       )}
                       {otros.length > 0 && (
-                        <optgroup label={delProveedor.length > 0 ? 'Otros productos' : 'Productos'}>
-                          {otros.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                        <optgroup label={delProveedor.length > 0 ? 'Otras presentaciones' : 'Presentaciones'}>
+                          {otros.map((it) => <option key={it.presentacion.id} value={it.presentacion.id}>{nombreItem(it.producto, it.presentacion)}</option>)}
                         </optgroup>
                       )}
                     </select>
                   </Campo>
 
-                  {!l.productoId && (
+                  {!l.presentacionId && (
                     <div className="linea-acciones">
-                      <button type="button" className="btn btn-secundario" onClick={() => setCreandoPara(l)}>
-                        <Icon name="mas" size={18} /> Crear producto
-                      </button>
+                      {puede('altaProducto') && (
+                        <button type="button" className="btn btn-secundario" onClick={() => setCreandoPara(l)}>
+                          <Icon name="mas" size={18} /> Crear
+                        </button>
+                      )}
                       <button type="button" className="btn btn-fantasma" onClick={() => cambiarLinea(l.key, { ignorada: true }, false)}>
                         Ignorar
                       </button>
@@ -259,7 +293,7 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
                   )}
 
                   <div className="fila-2">
-                    <Campo etiqueta="Cantidad" error={errCant} htmlFor={`cant-${l.key}`}>
+                    <Campo etiqueta={enBultos[l.key] && bultos ? `Bultos de ${bultos}` : 'Cantidad (unidades)'} error={errCant} htmlFor={`cant-${l.key}`}>
                       <div className="contador">
                         <button type="button" className="contador-btn" aria-label="Restar 1" onClick={() => {
                           const n = leerNumero(l.cantidad);
@@ -272,6 +306,14 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
                         }}>+</button>
                       </div>
                     </Campo>
+                    {bultos && (
+                      <Campo etiqueta="Se cargó en" htmlFor={`ub-${l.key}`}>
+                        <select id={`ub-${l.key}`} value={enBultos[l.key] ? 'bultos' : 'unidades'} onChange={(e) => setEnBultos((b) => ({ ...b, [l.key]: e.target.value === 'bultos' }))}>
+                          <option value="unidades">Unidades</option>
+                          <option value="bultos">Bultos de {bultos}</option>
+                        </select>
+                      </Campo>
+                    )}
                     {(producto?.perecedero || l.fechaVencimiento) && (
                       <Campo etiqueta="Vencimiento" htmlFor={`venc-${l.key}`}>
                         <input id={`venc-${l.key}`} type="date" value={l.fechaVencimiento} onChange={(e) => cambiarLinea(l.key, { fechaVencimiento: e.target.value })} />
@@ -280,7 +322,10 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
                   </div>
 
                   <div className="linea-pie">
-                    {l.revisar && l.productoId && (
+                    {enBultos[l.key] && bultos && typeof leerNumero(l.cantidad) === 'number' && (
+                      <span className="texto-suave">= {Number(leerNumero(l.cantidad)) * bultos} unidades</span>
+                    )}
+                    {l.revisar && l.presentacionId && (
                       <button type="button" className="btn-link" onClick={() => cambiarLinea(l.key, {})}>
                         <Icon name="check" size={16} /> Está bien
                       </button>
@@ -312,12 +357,12 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
       </div>
 
       {creandoPara && (
-        <ProductoForm
-          producto={null}
+        <AltaProducto
           nombreInicial={tituloDesdeRemito(creandoPara.descripcion)}
+          presentacionInicial={medidaDe(creandoPara.descripcion)?.replace('_', ',') ?? ''}
           proveedorIdsIniciales={proveedorId ? [proveedorId] : []}
           onCerrar={() => setCreandoPara(null)}
-          onGuardado={(p) => cambiarLinea(creandoPara.key, { productoId: p.id })}
+          onGuardado={(x) => cambiarLinea(creandoPara.key, { presentacionId: x.id })}
         />
       )}
 
