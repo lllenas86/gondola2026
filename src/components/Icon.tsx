@@ -22,6 +22,12 @@ const PATHS = {
   copiar: 'M9 9h11v12H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
   reiniciar: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5',
   carrito: 'M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h9.2a1 1 0 0 0 1-.8L20 8H6.2M9 20.5a1 1 0 1 0 0-.01M18 20.5a1 1 0 1 0 0-.01',
+  panel: 'M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z',
+  puntos: 'M5 12h.01M12 12h.01M19 12h.01',
+  grafico: 'M3 20h18M5 16l4-5 4 3 6-8',
+  usuarios: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7.5M22 21v-1a6 6 0 0 0-4-5.6',
+  salir: 'M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3',
+  vencer: 'M12 3s7 4 7 11a7 7 0 0 1-14 0c0-7 7-11 7-11zM12 10v4l2 2',
 } as const;
 
 export type IconName = keyof typeof PATHS;

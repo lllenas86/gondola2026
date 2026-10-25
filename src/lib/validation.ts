@@ -10,13 +10,36 @@ export function leerNumero(texto: string): number | null | 'invalido' {
   return Number(t);
 }
 
-export function validarProducto(input: { nombre: string; puntoDePedido: string }): Errores {
+export function validarProducto(input: { nombre: string }): Errores {
   const e: Errores = {};
   if (input.nombre.trim() === '') e.nombre = 'Escribí el nombre del producto.';
+  return e;
+}
+
+export interface EntradaPresentacion {
+  nombre: string;
+  puntoDePedido: string;
+  contenido: string;
+  unidadContenido: string;
+  unidadesPorBulto: string;
+  costoUnitario: string;
+}
+
+/** Valida una presentación. Los campos opcionales vacíos quedan sin dato (nunca se suponen). */
+export function validarPresentacion(input: EntradaPresentacion): Errores {
+  const e: Errores = {};
+  if (input.nombre.trim() === '') e.nombre = 'Escribí cómo se llama la presentación (por ejemplo, 1 L o 473 ml).';
   const pp = leerNumero(input.puntoDePedido);
   if (pp === null) e.puntoDePedido = 'Indicá el punto de pedido (puede ser 0).';
   else if (pp === 'invalido') e.puntoDePedido = 'El punto de pedido tiene que ser un número.';
   else if (pp < 0) e.puntoDePedido = 'El punto de pedido no puede ser negativo.';
+  const c = leerNumero(input.contenido);
+  if (c === 'invalido' || (typeof c === 'number' && c <= 0)) e.contenido = 'El tamaño tiene que ser un número mayor a 0.';
+  else if (typeof c === 'number' && !input.unidadContenido) e.contenido = 'Elegí la unidad del tamaño.';
+  const b = leerNumero(input.unidadesPorBulto);
+  if (b === 'invalido' || (typeof b === 'number' && b <= 0)) e.unidadesPorBulto = 'Tiene que ser un número mayor a 0, o dejalo vacío.';
+  const k = leerNumero(input.costoUnitario);
+  if (k === 'invalido' || (typeof k === 'number' && k < 0)) e.costoUnitario = 'El costo tiene que ser un número (o dejalo vacío).';
   return e;
 }
 
@@ -39,9 +62,11 @@ export function validarCantidadConteo(texto: string): string | null {
 export interface LineaBorrador {
   key: string;
   descripcion: string;
-  productoId: string | null;
+  presentacionId: string | null;
   cantidad: string;
   fechaVencimiento: string;
+  /** Motivo por el que la vinculación quedó para revisar */
+  motivoRevision?: string;
   /** 0 a 1. undefined en la carga manual. */
   confianza?: number;
   revisar: boolean;
@@ -65,7 +90,7 @@ export function validarRecepcion(proveedorId: string, fecha: string, lineas: Lin
 
   for (const l of lineas) {
     if (l.ignorada) continue;
-    if (!l.productoId) {
+    if (!l.presentacionId) {
       sinProducto++;
       errores[`${l.key}.producto`] = 'Elegí un producto, crealo o ignorá la línea.';
     }
@@ -73,8 +98,8 @@ export function validarRecepcion(proveedorId: string, fecha: string, lineas: Lin
     if (n === null || n === 'invalido' || n <= 0) {
       errores[`${l.key}.cantidad`] = 'La cantidad tiene que ser mayor a 0.';
     }
-    if (l.productoId && typeof n === 'number' && n > 0) {
-      validas.push({ productoId: l.productoId, cantidad: n, fechaVencimiento: l.fechaVencimiento || undefined });
+    if (l.presentacionId && typeof n === 'number' && n > 0) {
+      validas.push({ presentacionId: l.presentacionId, cantidad: n, fechaVencimiento: l.fechaVencimiento || undefined });
     }
   }
 

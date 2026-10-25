@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { BotonRestablecerDemo } from '../features/RestablecerDemo';
 import { useStore } from '../state/store';
 import { urlRemitoEjemplo } from '../demo/remitos';
 import { comprimirImagen, dataUrlABlob } from '../lib/imagen';
@@ -7,7 +6,8 @@ import { ErrorLectura, leerRemito } from '../lib/remitoIA';
 import { cancelarBorrador, crearBorradorDesdeFoto, subirFotoRemito } from '../lib/datos';
 import { urlFirmada } from '../lib/supabase';
 import { vincularLinea, vincularProveedor } from '../lib/match';
-import { productosDeProveedor } from '../lib/stock';
+import { itemsActivos, itemsDeProveedor, nombreDe, nombreItem } from '../lib/inventario';
+import { medidaPresentacion } from '../lib/match';
 import { formatFechaCorta, formatFechaHora, parseIsoDate } from '../lib/dates';
 import { Icon } from '../components/Icon';
 import { EstadoConexion, Hoja, Vacio } from '../components/ui';
@@ -65,7 +65,12 @@ export function RecepcionPage() {
     // Se guarda la foto en el bucket (si existe) mientras la IA la lee.
     const [subida, lectura] = await Promise.allSettled([
       subirFotoRemito(dataUrlABlob(imagen), nuevoId()),
-      leerRemito(imagen, data.productos.map((p) => p.nombre)),
+      // Se mandan los nombres con el tamaño, para que la IA distinga presentaciones
+      leerRemito(imagen, itemsActivos(data).map((it) => {
+        const n = nombreItem(it.producto, it.presentacion);
+        const m = medidaPresentacion(it);
+        return m && !n.includes(m.replace('_', ',')) ? `${n} (${m.replace('_', ',')})` : n;
+      })),
     ]);
     const imagenPath = subida.status === 'fulfilled' ? subida.value : null;
 
@@ -78,11 +83,13 @@ export function RecepcionPage() {
 
     // El vínculo final lo hace la app, por similitud de nombre.
     const proveedorId = vincularProveedor(extraccion.proveedor, data.proveedores);
-    const ids = new Set(proveedorId ? productosDeProveedor(data, proveedorId).map((p) => p.id) : []);
+    const ids = new Set(proveedorId ? itemsDeProveedor(data, proveedorId).map((it) => it.presentacion.id) : []);
+    const items = itemsActivos(data);
     const lineas: LineaBorradorBase[] = extraccion.lineas.map((l) => {
-      const v = vincularLinea(l.descripcion, data.productos, ids);
+      const v = vincularLinea(l.descripcion, items, ids, data.alias);
       return {
-        productoId: v.productoId,
+        presentacionId: v.presentacionId,
+        ...(v.motivo ? { motivoRevision: v.motivo } : {}),
         descripcion: l.descripcion,
         cantidad: l.cantidad,
         ...(l.fechaVencimiento ? { fechaVencimiento: l.fechaVencimiento } : {}),
@@ -244,12 +251,9 @@ export function RecepcionPage() {
 
           <section className="tarjeta tarjeta-demo">
             <h3 className="tarjeta-titulo"><Icon name="documento" /> Usar remito de ejemplo</h3>
-            <p className="texto-suave">Modo demo: abre un remito ficticio ya leído por la IA (guardado en la base como borrador), con algunos errores para practicar la revisión.</p>
+            <p className="texto-suave">Para evaluación: abre un remito ficticio ya leído por la IA (guardado en la base como borrador), con algunos errores para practicar la revisión.</p>
             {ejemplos.length === 0 ? (
-              <div className="acciones-columna">
-                <p className="texto-suave">Ya se usaron los dos remitos de ejemplo. Restablecé la demo para que vuelvan.</p>
-                <BotonRestablecerDemo variante="boton" />
-              </div>
+              <p className="texto-suave">Ya se usaron los remitos de ejemplo.</p>
             ) : (
               <div className="acciones-columna">
                 {ejemplos.map((b) => (
@@ -305,9 +309,9 @@ export function RecepcionPage() {
         <Hoja titulo={`Recepción del ${formatFechaCorta(detalle.fecha)}`} onCerrar={() => setDetalle(null)}>
           <p className="texto-suave">{data.proveedores.find((p) => p.id === detalle.proveedorId)?.nombre}</p>
           <ul className="lista-cambios">
-            {detalle.lineas.map((l) => (
-              <li key={l.productoId}>
-                <span>{data.productos.find((p) => p.id === l.productoId)?.nombre ?? 'Producto eliminado'}</span>
+            {detalle.lineas.map((l, i) => (
+              <li key={`${l.presentacionId}-${i}`}>
+                <span>{nombreDe(data, l.presentacionId)}</span>
                 <span className="cambio-num">
                   +{l.cantidad}
                   {l.fechaVencimiento && <small> · vence {formatFechaCorta(l.fechaVencimiento)}</small>}

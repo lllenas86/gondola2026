@@ -1,64 +1,23 @@
-// Cantidad sugerida a pedir y armado del mensaje para el proveedor.
-// Funciones puras: no leen la base ni el reloj (reciben todo por parámetro).
+// Cantidad sugerida a pedir, prioridades y armado del mensaje para el proveedor.
+// Asistente basado en reglas y datos reales (no usa un modelo de IA).
 //
-// Idea: lo que se pide en esta visita tiene que alcanzar hasta la visita siguiente
-// del mismo proveedor, sin bajar del punto de pedido.
+// Lo que se pide en una visita tiene que alcanzar hasta la entrega siguiente sin bajar
+// del punto de pedido:
 //
-//   consumo diario     = Σ consumo ÷ Σ días   (períodos entre conteos, vista v_consumo_historico)
-//   stock en la visita = stock actual − consumo diario × días hasta la visita
-//   cantidad sugerida  = consumo diario × días entre esta visita y la siguiente
-//                        (la siguiente de cualquier proveedor que traiga el producto)
-//                        + punto de pedido − stock en la visita       (redondeado hacia arriba, mínimo 0)
+//   stock en la visita = proyección (último conteo − consumo estimado, sin lo vencido)
+//   cantidad sugerida  = consumo diario × días hasta la entrega siguiente
+//                        (la siguiente de cualquier proveedor que traiga esa presentación)
+//                        + punto de pedido − stock en la visita    (hacia arriba, mínimo 0)
 //
-// Sin historial de consumo se sugiere llegar al doble del punto de pedido.
+// Sin historial de consumo se sugiere llegar al doble del punto de pedido, y se avisa.
 
-import type { AppData, FilaConsumo, Producto, Proveedor, Vistas } from '../types';
+import type { AppData, Presentacion, Proveedor, Vistas } from '../types';
 import { addDays, DIAS_LARGOS, diffDays, formatFechaCorta, isoDate } from './dates';
-import { calcularStock, proveedoresDeProducto, proximaVisita } from './stock';
-
-/** Cuántos períodos recientes se usan como máximo para el promedio. */
-export const PERIODOS_CONSUMO = 6;
-
-/**
- * Consumo promedio por día de un producto. Devuelve null si no hay historial útil.
- * Se descartan los períodos con consumo negativo: indican una recepción que no se registró.
- */
-export function consumoDiario(filas: FilaConsumo[], productoId: string): number | null {
-  const utiles = filas.filter((f) => f.productoId === productoId && f.dias > 0 && f.consumo >= 0).slice(-PERIODOS_CONSUMO);
-  const dias = utiles.reduce((a, f) => a + f.dias, 0);
-  if (dias <= 0) return null;
-  return utiles.reduce((a, f) => a + f.consumo, 0) / dias;
-}
-
-export interface DatosSugerencia {
-  /** null = nunca se contó (se toma como 0) */
-  stock: number | null;
-  puntoDePedido: number;
-  /** null = sin historial */
-  consumoDiario: number | null;
-  /** Días desde hoy hasta la visita en la que se hace el pedido (0 = hoy) */
-  diasHastaVisita: number;
-  /** Días entre esa visita y la siguiente del mismo proveedor */
-  diasCobertura: number;
-}
-
-export interface Sugerencia {
-  cantidad: number;
-  conHistorial: boolean;
-  /** Stock estimado al momento de la visita */
-  stockEnVisita: number;
-}
-
-export function sugerirCantidad(d: DatosSugerencia): Sugerencia {
-  const stock = Math.max(0, d.stock ?? 0);
-  if (d.consumoDiario === null) {
-    return { cantidad: Math.max(0, Math.ceil(2 * d.puntoDePedido - stock)), conHistorial: false, stockEnVisita: stock };
-  }
-  const stockEnVisita = Math.max(0, stock - d.consumoDiario * d.diasHastaVisita);
-  const necesario = d.consumoDiario * d.diasCobertura + d.puntoDePedido - stockEnVisita;
-  // El margen evita que 2,0000001 por redondeo de punto flotante se convierta en 3
-  return { cantidad: Math.max(0, Math.ceil(necesario - 1e-6)), conHistorial: true, stockEnVisita: redondear(stockEnVisita) };
-}
+import { proximaVisita } from './stock';
+import {
+  formatoCantidad, nombreItem, proveedoresDe, stockDe, type Item, type RitmoConsumo,
+} from './inventario';
+import { proyectar } from './proyeccion';
 
 export interface Ventana {
   /** Visita en la que se hace el pedido (hoy incluido) */
@@ -77,42 +36,136 @@ export function ventanaDePedido(proveedor: Proveedor, hoy: Date): Ventana | null
   return { visita, siguiente, diasHastaVisita: diffDays(hoy, visita), diasCobertura: diffDays(visita, siguiente) };
 }
 
-/** Sugerencia para un producto en la ventana de un proveedor, a partir de los datos cargados. */
-export function sugerenciaProducto(
-  data: AppData,
-  vistas: Vistas,
-  producto: Producto,
-  ventana: Ventana,
-): Sugerencia & { consumoDiario: number | null; stock: number | null } {
-  const fila = vistas.stock.find((f) => f.productoId === producto.id);
-  const stock = fila ? fila.stockActual : calcularStock(data, producto).stock;
-  const c = consumoDiario(vistas.consumo, producto.id);
-  // Si otro proveedor también lo trae y pasa antes, alcanza con cubrir hasta esa visita.
-  const otras = proveedoresDeProducto(data, producto.id)
-    .map((p) => proximaVisita(p, addDays(ventana.visita, 1)))
-    .filter((d): d is Date => d !== null)
-    .map((d) => diffDays(ventana.visita, d));
-  const diasCobertura = Math.min(ventana.diasCobertura, ...otras);
-  const s = sugerirCantidad({
-    stock,
-    puntoDePedido: producto.puntoDePedido,
-    consumoDiario: c,
-    diasHastaVisita: ventana.diasHastaVisita,
-    diasCobertura,
-  });
-  return { ...s, consumoDiario: c, stock };
+export type Prioridad = 'alta' | 'media' | 'baja' | 'ninguna';
+
+export interface Sugerencia {
+  item: Item;
+  /** Stock registrado (null = nunca se contó) */
+  stock: number | null;
+  /** Stock estimado al llegar la visita (null = sin ritmo de consumo) */
+  stockEnVisita: number | null;
+  ritmo: RitmoConsumo | null;
+  cantidad: number;
+  conHistorial: boolean;
+  diasCobertura: number;
+  /** Hasta cuándo tiene que alcanzar (la entrega siguiente que trae esta presentación) */
+  hasta: Date;
+  prioridad: Prioridad;
+  /** Explicaciones con los datos usados */
+  motivos: string[];
+  /** Advertencias (por ejemplo, vencimientos) */
+  avisos: string[];
+}
+
+const fmt = (n: number) => formatoCantidad(Math.round(n * 10) / 10);
+
+/** Sugerencia para una presentación en la ventana de un proveedor. */
+export function sugerir(data: AppData, vistas: Vistas, item: Item, ventana: Ventana, ahora: Date = new Date()): Sugerencia {
+  const { presentacion } = item;
+  const stock = stockDe(data, vistas, presentacion.id);
+
+  // Si otro proveedor también la trae y pasa antes de la siguiente, alcanza con cubrir hasta esa visita.
+  let hasta = ventana.siguiente;
+  let otroAntes: string | null = null;
+  for (const p of proveedoresDe(data, presentacion.id)) {
+    const v = proximaVisita(p, addDays(ventana.visita, 1));
+    if (v && v < hasta) {
+      hasta = v;
+      otroAntes = p.nombre;
+    }
+  }
+  const diasCobertura = Math.max(1, diffDays(ventana.visita, hasta));
+  const proy = proyectar(data, vistas, presentacion, ahora, { horizonte: ventana.diasHastaVisita + diasCobertura });
+  const ritmo = proy.ritmo;
+  const motivos: string[] = [];
+  const avisos: string[] = [];
+  const pp = presentacion.puntoDePedido;
+
+  let cantidad: number;
+  let stockEnVisita: number | null = null;
+  if (ritmo && proy.stockHoy !== null) {
+    stockEnVisita = ventana.diasHastaVisita === 0
+      ? proy.stockHoy
+      : proy.puntos.find((x) => x.dia === ventana.diasHastaVisita - 1)?.disponible ?? proy.stockHoy;
+    const necesario = ritmo.porDia * diasCobertura + pp - stockEnVisita;
+    // El margen evita que 2,0000001 por redondeo de punto flotante se convierta en 3
+    cantidad = Math.max(0, Math.ceil(necesario - 1e-6));
+    motivos.push(
+      `Consumo estimado ~${fmt(ritmo.porDia)} por día (promedio de ${ritmo.periodos} ${ritmo.periodos === 1 ? 'período' : 'períodos'} entre conteos, ${formatFechaCorta(ritmo.desde)} al ${formatFechaCorta(ritmo.hasta)}). Supone que el ritmo se mantiene.`,
+    );
+    if (proy.fechaQuiebre && proy.fechaQuiebre <= isoDate(hasta)) {
+      motivos.push(`Sin pedir, podría agotarse alrededor del ${formatFechaCorta(proy.fechaQuiebre)}, antes de la entrega siguiente (${formatFechaCorta(isoDate(hasta))}).`);
+    } else if (proy.fechaPuntoPedido && proy.fechaPuntoPedido <= isoDate(hasta)) {
+      motivos.push(`Podría bajar del punto de pedido (${fmt(pp)}) alrededor del ${formatFechaCorta(proy.fechaPuntoPedido)}.`);
+    }
+  } else {
+    cantidad = Math.max(0, Math.ceil(2 * pp - Math.max(0, stock ?? 0)));
+    motivos.push(proy.faltante ?? 'Sin historial de consumo.');
+    if (cantidad > 0) motivos.push(`Por eso se sugiere llegar al doble del punto de pedido (${fmt(2 * pp)}).`);
+  }
+  if (stock !== null && stock <= pp) motivos.unshift(`Stock registrado ${fmt(stock)}, en o por debajo del punto de pedido (${fmt(pp)}).`);
+  if (stock === null) motivos.unshift('Nunca se contó: el stock es desconocido.');
+  if (otroAntes) motivos.push(`También la trae ${otroAntes}, que pasa antes: se cubre solo hasta esa visita.`);
+
+  const enRiesgo = proy.lotesEnRiesgo.filter((l) => l.sinSalida > 0);
+  for (const l of enRiesgo) {
+    avisos.push(l.yaVencido
+      ? `Hay ${fmt(l.sinSalida)} vencidas (${formatFechaCorta(l.fechaVencimiento)}) que no se cuentan como disponibles.`
+      : `${fmt(l.sinSalida)} del lote que vence el ${formatFechaCorta(l.fechaVencimiento)} podrían quedar sin salida: no conviene pedir de más.`);
+  }
+
+  // Prioridad
+  let prioridad: Prioridad = 'ninguna';
+  if (cantidad > 0) {
+    const finVentana = isoDate(hasta);
+    if ((stock !== null && stock <= pp) || stock === null || (proy.fechaQuiebre !== null && proy.fechaQuiebre <= finVentana)) prioridad = 'alta';
+    else if (stockEnVisita !== null && stockEnVisita <= pp) prioridad = 'alta';
+    else if (proy.fechaPuntoPedido !== null && proy.fechaPuntoPedido <= finVentana) prioridad = 'media';
+    else prioridad = 'baja';
+  }
+
+  return { item, stock, stockEnVisita, ritmo, cantidad, conHistorial: !!ritmo, diasCobertura, hasta, prioridad, motivos, avisos };
+}
+
+/** Redondea hacia arriba a bultos completos, solo si la equivalencia está configurada. */
+export function aBultos(cantidad: number, presentacion: Presentacion): number {
+  const b = presentacion.unidadesPorBulto;
+  if (!b || cantidad <= 0) return cantidad;
+  return Math.ceil(cantidad / b - 1e-9) * b;
 }
 
 export interface ItemPedido {
+  presentacion: Presentacion;
   nombre: string;
   cantidad: number;
 }
 
-/** Texto del pedido listo para mandar por WhatsApp o copiar. */
-export function mensajePedido(proveedor: Proveedor, visita: Date, items: ItemPedido[]): string {
-  const lineas = items.filter((i) => i.cantidad > 0).map((i) => `• ${formatearCantidad(i.cantidad)} × ${i.nombre}`);
+/** "(2 bultos de 8)" si la cantidad es múltiplo exacto de la equivalencia configurada. */
+export function textoBultos(cantidad: number, presentacion: Presentacion): string {
+  const b = presentacion.unidadesPorBulto;
+  if (!b || cantidad <= 0) return '';
+  const n = cantidad / b;
+  return Number.isInteger(n) ? ` (${n} ${n === 1 ? 'bulto' : 'bultos'} de ${formatearCantidad(b)})` : '';
+}
+
+/** Texto del pedido listo para mandar por WhatsApp o copiar. Una línea por presentación. */
+export function mensajePedido(proveedor: Proveedor, visita: Date, items: ItemPedido[], nota = ''): string {
+  const lineas = items
+    .filter((i) => i.cantidad > 0)
+    .map((i) => `• ${formatearCantidad(i.cantidad)} × ${i.nombre}${textoBultos(i.cantidad, i.presentacion)}`);
   const dia = `${DIAS_LARGOS[visita.getDay()]} ${formatFechaCorta(isoDate(visita))}`;
-  return [`Hola ${proveedor.nombre}! Te paso el pedido para el ${dia}:`, '', ...lineas, '', '¡Gracias!'].join('\n');
+  return [
+    `Hola ${proveedor.nombre}! Te paso el pedido para el ${dia}:`,
+    '',
+    ...lineas,
+    ...(nota.trim() ? ['', nota.trim()] : []),
+    '',
+    '¡Gracias!',
+  ].join('\n');
+}
+
+export function nombrePedido(item: Item): string {
+  return nombreItem(item.producto, item.presentacion);
 }
 
 /**
@@ -138,15 +191,11 @@ export function telefonoWhatsApp(texto: string | undefined): string | null {
   return d.length === 10 ? `549${d}` : null;
 }
 
-/** Link de WhatsApp. Sin teléfono, WhatsApp deja elegir el contacto. */
+/** Link de WhatsApp. Sin teléfono, WhatsApp deja elegir el contacto. Nunca envía solo. */
 export function linkWhatsApp(telefono: string | null, texto: string): string {
   return `https://wa.me/${telefono ?? ''}?text=${encodeURIComponent(texto)}`;
 }
 
 function formatearCantidad(n: number): string {
   return Number.isInteger(n) ? String(n) : String(n).replace('.', ',');
-}
-
-function redondear(n: number): number {
-  return Math.round(n * 10) / 10;
 }

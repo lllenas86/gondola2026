@@ -2,7 +2,10 @@
 
 App web **mobile-first** para el dueño o encargado de un almacén de barrio. Responde a la pregunta del momento clave: **"pasa el proveedor, ¿qué tengo y qué le pido?"**.
 
-- Un solo comercio, sin login.
+- **Productos con presentaciones** (473 ml, 1 L…): el stock, el punto de pedido y los proveedores son de cada presentación.
+- Inventario inicial y conteos periódicos **sin elegir proveedor**, con lotes por vencimiento y revisión de diferencias.
+- Vencimientos y mermas, **devoluciones al proveedor con remito** y bajas, **proyección temporal** del stock y **asistente de pedidos** por WhatsApp.
+- Sin usuarios (como antes) o, con `supabase/05`, **login y roles** (empleado, encargado, dueño) protegidos en la base.
 - **Los datos se guardan en Supabase** (la nube): se puede usar desde más de un celular. No se guarda nada en el navegador.
 - Stack: React 18 + TypeScript (estricto) + Vite 5. Estilos en CSS propio (`src/index.css`), sin librerías de UI. Supabase por su API REST (sin dependencias extra). Lectura de remitos con IA en una función de Vercel (`api/leer-remito.js`).
 
@@ -12,7 +15,15 @@ Una sola vez, en Supabase → **SQL Editor**:
 
 1. `supabase/01_esquema.sql`: crea las tablas (`productos`, `proveedores`, `producto_proveedor`, `conteos`, `recepciones`, `recepcion_lineas`), las vistas (`v_stock_actual`, `v_visitas_proximas`, `v_vencimientos`, `v_consumo_historico`), las reglas que rechazan datos inválidos, los permisos y el bucket `remitos`.
 2. `supabase/02_datos_ejemplo.sql`: carga los datos de prueba y los dos remitos de ejemplo en borrador. **Borra todo lo cargado**: sirve para resetear la demo.
-3. `supabase/03_pedido_y_demo.sql`: agrega el teléfono del proveedor (para el pedido por WhatsApp) y la función `gondola_restablecer_demo()`, que usa el botón **Restablecer demo** de la app. Sin este paso la app funciona igual, pero sin teléfono y el botón avisa que falta correrlo.
+3. `supabase/03_pedido_y_demo.sql`: agrega el teléfono del proveedor (para el pedido por WhatsApp) y la función `gondola_restablecer_demo()`.
+4. **`supabase/04_presentaciones_lotes_devoluciones.sql`** (obligatorio para esta versión): presentaciones, lotes, devoluciones, bajas y vistas por presentación. Conserva los datos: cada producto existente recibe una presentación «Única» 1:1 con todo su historial. Se puede volver a correr.
+5. **`supabase/05_roles_y_almacenes.sql`**: login, almacenes y roles (Dueña, Encargado, Empleado) con políticas RLS. Desde acá la base no entrega datos sin sesión.
+6. **`supabase/06_cuentas_evaluacion.sql`**: asigna el rol a las tres cuentas de evaluación (crearlas antes en Authentication → Users) y las protege para que no se modifiquen desde la app.
+
+Si después de la 05 nadie puede entrar: `supabase/mantenimiento/recuperar_acceso_sin_login.sql` vuelve al acceso sin login sin borrar datos (para reactivar el login, ver el final del archivo).
+
+Detalle de los cambios, pasos de migración y pruebas: [`MEJORAS_2026-10.md`](MEJORAS_2026-10.md).
+Los datos de ejemplo se recargan solo desde el SQL Editor con `select gondola_restablecer_demo();` (borra lo cargado). La app no tiene botón de reinicio.
 
 ## Variables de entorno (Vercel → Settings → Environment Variables)
 
@@ -30,13 +41,16 @@ Si no hay conexión con la base, la app lo avisa ("Sin conexión con la base: lo
 
 ## Cómo probarla
 
+En la pantalla de ingreso, **Acceso rápido para evaluación** entra con un toque como Dueña, Encargado o Empleado (cuentas reales de Supabase Auth, clave `demo1234`). Cada perfil ve su propio menú y la base aplica sus permisos.
+
 **Con Node 18 o superior:**
 
 1. `npm install`
 2. Crear `.env.local` con `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 3. `npm run dev` → abre `http://localhost:5173` (para probar también la lectura del remito: `vercel dev`)
-3. `npm run typecheck` → revisa los tipos
-4. `npm run build` → genera `/dist` (lo usa Vercel)
+4. `npm test` → pruebas automáticas de la lógica (stock, lotes, proyección, pedido, remitos)
+5. `npm run typecheck` → revisa los tipos
+6. `npm run build` → genera `/dist` (lo usa Vercel)
 
 ## Subir a GitHub y Vercel
 
@@ -49,29 +63,38 @@ La navegación usa `#` en la URL (`/#/contar`), así que recargar cualquier pant
 
 ## Pantallas
 
-| Barra inferior | Qué hace |
+La barra inferior depende del rol (sin usuarios se ven todas). Las secciones:
+
+| Sección | Qué hace |
 | --- | --- |
-| **Hoy** | 1) **Te falta pedir** (siempre visible, cualquier día): productos bajo el punto de pedido, agrupados por el proveedor que pasa antes ("Lo trae Lácteos del Sur · pasa el lunes 26/10"). Si no falta nada: "Todo en orden ✓" y la próxima visita. 2) Pasan hoy y mañana. 3) Por vencer (7 días). 4) Sin contar hace +7 días. Cada producto muestra **"Sugerido: pedir N"** y cada proveedor tiene **Armar pedido**: cantidades editables, **Enviar por WhatsApp** o **Copiar pedido**. |
-| **Contar** | Elegís el proveedor y cargás la cantidad (con botones − / +) y, en perecederos, el vencimiento. "Guardar conteo" guarda todos los completados de una vez. |
-| **Recepción** | **Sacar foto** del remito (lectura real con IA), remito de ejemplo (borradores guardados en la base) o carga manual. Pantalla de revisión obligatoria y últimas recepciones. |
-| **Catálogo** | Productos y proveedores: alta, edición, días de visita, WhatsApp del proveedor y asociación muchos a muchos. Al final, **Restablecer demo** (también aparece en Recepción cuando ya se usaron los remitos de ejemplo). |
+| **Hoy** (encargado) | Lo que falta pedir agrupado por el proveedor que pasa antes, proveedores de hoy y mañana con **Preparar pedido**, resumen de vencimientos, lo que podría agotarse en 7 días y lo que no se cuenta hace +7 días. |
+| **Tareas** (empleado) | Remitos para revisar, qué contar, vencidos para separar de la góndola. |
+| **Panel** (dueño) | Inventario y su valor, riesgo de faltantes, vencimientos, mermas de 30 días y consumo/rotación estimados. |
+| **Contar** | Todas las presentaciones, sin elegir proveedor. Filtros: sin stock inicial, +7 días, perecederas. Lotes con vencimientos distintos. Antes de guardar muestra **registrado vs. contado** y la diferencia; el historial queda en «Conteos anteriores». |
+| **Recepción** | Foto del remito (IA) o carga manual, por presentación. Reconoce el tamaño (500 cc ≠ 2,25 L), aprende los textos que se corrigen a mano y acepta bultos solo si la equivalencia está configurada. |
+| **Vencimientos** | Vencido en stock / vence ≤3 días / esta semana, por lote, con valor a costo si hay costo. **Devolver al proveedor** (remito preparada → confirmada → resuelta) o **Dar de baja**. |
+| **Proyección** | Control temporal (7/14/30 días): stock estimado por día, quiebre, punto de pedido, vencimientos sin salida; detalle con gráfico y simulación del pedido sugerido. |
+| **Pedidos** | Proveedores con próxima visita y **asistente de pedido**: prioridades con su porqué, cantidades editables, mensaje revisable y WhatsApp (nunca envía solo). |
+| **Catálogo** | Ficha de producto con sus presentaciones (tamaño, unidad, punto de pedido, costo, bulto, proveedores), **Mover a otro producto** y proveedores. |
+| **Equipo** (dueño, con 05) | Usuarios del almacén y su rol. |
 
 ## Regla crítica: el stock nunca se sobrescribe
 
-No existe un campo "stock". Cada conteo y cada recepción se guardan como registros con fecha y hora, y el stock se calcula:
+No existe un campo "stock". Cada conteo, recepción, devolución y baja se guarda como registro con fecha y hora, y el stock **de cada presentación** se calcula:
 
-> **Stock actual = último conteo + recepciones registradas después de ese conteo.**
+> **Stock = último conteo + recepciones confirmadas después − devoluciones confirmadas después − bajas después.**
 
-Lo calcula la base en la vista `v_stock_actual` (y la app con la misma regla en `src/lib/stock.ts`). El historial completo queda en `conteos` y `recepciones`; `v_consumo_historico` deja listo el consumo entre conteos para la futura recomendación (HU7).
+Lo calcula la base en `v_stock_presentacion` y la app con la misma regla en `src/lib/inventario.ts` (que además arma los lotes por vencimiento). El conteo es la verdad física: la diferencia con lo registrado queda guardada en el conteo (`stock_registrado`). Sin sistema de ventas, el consumo se estima entre conteos (`v_consumo_presentacion`) y se muestra siempre como estimación.
 
 ## Cantidad sugerida a pedir
 
 Está en `src/lib/pedido.ts` (funciones puras). Lo que se pide en una visita tiene que alcanzar hasta la entrega siguiente sin bajar del punto de pedido:
 
-- **Consumo diario** = consumo ÷ días de los últimos períodos entre conteos (vista `v_consumo_historico`). Los períodos con consumo negativo, que indican una recepción sin registrar, se descartan.
-- **Stock en la visita** = stock actual − consumo diario × días hasta la visita.
+- **Consumo diario** = consumo ÷ días de los últimos períodos entre conteos de esa presentación (vista `v_consumo_presentacion`; descuenta devoluciones y bajas). Los períodos con consumo negativo, que indican una recepción sin registrar, se descartan.
+- **Stock en la visita** = proyección desde el último conteo (`src/lib/proyeccion.ts`): resta el consumo estimado día por día y deja de contar lo que vence.
 - **Cantidad sugerida** = consumo diario × días hasta la entrega siguiente + punto de pedido − stock en la visita, redondeada hacia arriba. La entrega siguiente es la del mismo proveedor, o la de otro que traiga el mismo producto si pasa antes.
-- Sin historial de consumo, se sugiere llegar al doble del punto de pedido.
+- Sin historial de consumo, se sugiere llegar al doble del punto de pedido, y el asistente lo dice.
+- El asistente agrupa por prioridad (alta, conviene, podés sumar) y explica cada ítem con los datos usados. Es un asistente de reglas: no usa IA generativa. Para sumar redacción con un modelo habría que reutilizar la función del servidor (como `api/leer-remito.js`), nunca con la clave en el navegador.
 
 El pedido no se guarda: se registra cuando llega la mercadería, en Recepción.
 
@@ -79,17 +102,17 @@ El pedido no se guarda: se registra cuando llega la mercadería, en Recepción.
 
 1. Se saca o sube la foto. Se achica a JPEG de menos de 1,5 MB y se guarda en el bucket `remitos` (si existe).
 2. La función del servidor `api/leer-remito.js` se la manda al modelo de visión junto con la lista de productos del catálogo y le pide solo JSON (`proveedor`, `fecha`, `lineas` con `descripcion`, `cantidad`, `fecha_vencimiento`, `confianza`). La clave del modelo (`VISION_API_KEY`) nunca llega al navegador.
-3. La app vincula cada línea con el catálogo por similitud de nombre (`src/lib/match.ts`) y crea la recepción **en borrador** (`origen = 'remito_foto'`, respuesta cruda en `datos_ia`, una fila por línea en `recepcion_lineas` con `confianza_ia`; `estado = 'sin_vincular'` si no encontró producto).
+3. La app vincula cada línea con una **presentación** del catálogo (`src/lib/match.ts`): primero los textos ya corregidos a mano (alias), después nombre + tamaño; si el tamaño no coincide o el remito no lo dice y hay varias presentaciones, la deja para revisar y crea la recepción **en borrador** (`origen = 'remito_foto'`, respuesta cruda en `datos_ia`, una fila por línea en `recepcion_lineas` con `confianza_ia`; `estado = 'sin_vincular'` si no encontró producto).
 4. **Revisión obligatoria**: foto y datos lado a lado. En amarillo, las líneas sin vincular o con confianza menor a 75 %. Las que no están en el catálogo permiten "Crear producto" o "Ignorar".
 5. Solo "Confirmar recepción" suma al stock. La base no deja confirmar con líneas sin vincular.
 6. Si la imagen es ilegible o el modelo falla: aviso y botón "Cargar a mano".
 
-**Modo demo.** "Usar remito de ejemplo" abre los remitos en borrador que carga `02_datos_ejemplo.sql` (Lácteos del Sur y Distribuidora Centro):
+**Remitos de ejemplo (para evaluación).** "Usar remito de ejemplo" abre los remitos en borrador de los datos de ejemplo (Lácteos del Sur y Distribuidora Centro):
 
 - Lácteos del Sur: el yogur figura 12 en el remito pero la IA "leyó" 18 con confianza baja (amarillo), y el queso crema no está en el catálogo.
-- Distribuidora Centro: el agua tiene lectura dudosa y la Fanta no está en el catálogo.
+- Distribuidora Centro: trae Coca-Cola en **2,25 L y 500 cc** (dos presentaciones del mismo producto), el agua tiene lectura dudosa y la Fanta no está en el catálogo.
 
-Una vez confirmados dejan de ser borradores; para repetir la demo, se vuelve a correr `02_datos_ejemplo.sql`.
+Una vez confirmados dejan de ser borradores; para repetirlos hay que recargar los datos de ejemplo desde el SQL Editor.
 
 Las imágenes también están en `docs/remitos-ejemplo/` para probar el camino de la foto.
 
@@ -97,17 +120,17 @@ Las imágenes también están en `docs/remitos-ejemplo/` para probar el camino d
 
 > "Mañana pasa Distribuidora Centro. Contá sus productos y cargalos. Después cargá el remito de ejemplo que te dejó Lácteos del Sur y corregí lo que esté mal."
 
-Recorrido esperado: **Hoy** → "Contar productos de este proveedor" en Distribuidora Centro → cargar las 3 cantidades → "Guardar conteo" → **Recepción** → "Usar remito de ejemplo · Lácteos del Sur" → ampliar la foto, corregir el yogur a 12, "Crear producto" para el queso crema → "Confirmar recepción". El resumen muestra el stock antes y después (por ejemplo, Leche 30 → 54).
+Recorrido esperado: **Contar** (sin elegir proveedor) → cargar las cantidades → «Revisar y guardar» → ver las diferencias → «Guardar conteo» → **Recepción** → "Usar remito de ejemplo · Lácteos del Sur" → ampliar la foto, corregir el yogur a 12, "Crear producto" para el queso crema → "Confirmar recepción". El resumen muestra el stock antes y después (por ejemplo, Leche 30 → 54).
 
 ## Historias y criterios de aceptación
 
 | Historia | Criterio | Dónde |
 | --- | --- | --- |
-| HU1 Registrar productos | Alta con nombre, unidad, perecedero y punto de pedido; aparece en el listado | `features/ProductoForm.tsx`, `pages/CatalogoPage.tsx` |
+| HU1 Registrar productos | Ficha con nombre y perecedero, y una o más presentaciones (tamaño, unidad, punto de pedido, costo, bulto, proveedores) | `features/ProductoFicha.tsx`, `pages/CatalogoPage.tsx` |
 | | NEGATIVO: sin nombre o duplicado → mensaje claro; punto de pedido negativo → rechazado (la app y la base) | `lib/validation.ts`, `lib/errores.ts`, `supabase/01_esquema.sql` |
-| HU2 Registrar stock | Cantidad por producto, fecha y hora, sin borrar anteriores; vencimiento en perecederos | `pages/ContarPage.tsx`, acción `registrarConteos` (solo agrega) |
+| HU2 Registrar stock | Cantidad por presentación, sin proveedor, fecha y hora, sin borrar anteriores; lotes por vencimiento; diferencias con lo registrado | `pages/ContarPage.tsx`, acción `registrarConteos` (solo agrega) |
 | | NEGATIVO: cantidades negativas rechazadas | `validarCantidadConteo` |
-| HU3 Administrar proveedores | Nombre, uno o más días, productos asociados (muchos a muchos) | `features/ProveedorForm.tsx` |
+| HU3 Administrar proveedores | Nombre, uno o más días, presentaciones asociadas (muchos a muchos) | `features/ProveedorForm.tsx` |
 | | NEGATIVO: sin nombre o sin días → no se guarda | `validarProveedor` |
 | HU8 Recepción desde foto | Foto, propuesta de proveedor/fecha/líneas, corrección, suma al stock al confirmar | `pages/RecepcionPage.tsx`, `features/RevisionRecepcion.tsx` |
 | | NEGATIVO: nada se guarda sin confirmar; imagen ilegible → aviso + carga manual; no se confirma con líneas sin producto (la app y la base) | `api/leer-remito.js`, `lib/remitoIA.ts`, `validarRecepcion` |
@@ -116,33 +139,32 @@ Recorrido esperado: **Hoy** → "Contar productos de este proveedor" en Distribu
 
 ```text
 api/leer-remito.js            función de Vercel: lectura del remito con IA (clave en el servidor)
-supabase/                     01_esquema.sql (tablas, vistas, reglas), 02_datos_ejemplo.sql y 03_pedido_y_demo.sql
+supabase/                     01 esquema · 02 datos de ejemplo · 03 pedido y demo · 04 presentaciones, lotes, devoluciones · 05 roles
 src/
-├── types.ts                  modelo de datos
+├── types.ts                  modelo de datos (producto → presentaciones)
 ├── lib/
-│   ├── supabase.ts           conexión con Supabase (API REST y Storage) y variables de entorno
-│   ├── datos.ts              lectura y escritura de cada tabla y vista
-│   ├── errores.ts            errores de la base → mensajes en lenguaje simple
-│   ├── stock.ts              cálculo de stock y próximas visitas
-│   ├── pedido.ts             cantidad sugerida y mensaje de WhatsApp
-│   ├── match.ts              vinculación remito ↔ catálogo por similitud
-│   ├── validation.ts         reglas y mensajes de validación
-│   ├── remitoIA.ts           llamada a /api/leer-remito
-│   ├── storage.ts, router.ts, dates.ts, imagen.ts
-├── demo/remitos.ts           dibujo de los remitos de ejemplo (SVG)
-├── state/store.tsx           estado global: lee Supabase, estado de conexión
-├── components/               ícono, hoja inferior, campos, avisos, indicador de conexión
-├── features/                 formularios, pantalla de revisión, hoja de pedido y restablecer demo
-└── pages/                    Hoy, Contar, Recepción, Catálogo
+│   ├── inventario.ts         stock por presentación, lotes FEFO, consumo estimado, vencimientos (reglas únicas)
+│   ├── proyeccion.ts         proyección día por día (simulador y pedido usan la misma)
+│   ├── pedido.ts             sugerencia, prioridades y mensaje de WhatsApp
+│   ├── vencimientos.ts       alertas por lote y mermas
+│   ├── match.ts              vinculación remito ↔ presentación (tamaño y alias)
+│   ├── auth.ts, permisos.ts  sesión de Supabase Auth y qué ve cada rol
+│   ├── datos.ts, supabase.ts, errores.ts, validation.ts, stock.ts (visitas), dates.ts, router.ts…
+│   └── logica.test.ts        pruebas automáticas (Vitest)
+├── state/store.tsx           estado global, modo sin usuarios / con usuarios
+├── features/                 ficha de producto, revisión de recepción, asistente de pedido, devolución y baja
+└── pages/                    Hoy, Tareas, Panel, Contar, Recepción, Vencimientos, Proyección, Pedidos, Catálogo, Equipo, Ingreso
+pruebas-locales/              entorno usado para probar de punta a punta (Postgres local + navegador)
 ```
 
 ## Datos de prueba
 
-Distribuidora Centro (martes y viernes): Coca-Cola 2,25 L, Sprite 2,25 L, Agua mineral 1,5 L. Lácteos del Sur (lunes, miércoles y viernes): Leche entera 1 L y Yogur bebible 1 L (perecederos). Mayorista Rosario (jueves): Yerba 1 kg y Coca-Cola 2,25 L. Hay conteos de las últimas 3 semanas y 3 recepciones pasadas. Las fechas se calculan desde el día en que se corre `02_datos_ejemplo.sql`; la Yerba se contó hace 9 días para que aparezca como "sin contar".
+Los datos de ejemplo (`gondola_restablecer_demo()`) traen: Coca-Cola en **2,25 L y 500 ml**, Sprite 2,25 L, Agua 1,5 L (Distribuidora Centro, martes y viernes); Leche entera 1 L y Yogur bebible en **1 L y 190 g** (Lácteos del Sur, lunes, miércoles y viernes); Yerba mate **1 kg y 500 g** (Mayorista Rosario, jueves). Hay lotes con vencimientos distintos, 3 yogures vencidos todavía en stock, una devolución resuelta, una baja, un remito de ejemplo con dos presentaciones de Coca-Cola y una presentación sin costo (para mostrar «valor no calculable»).
 
 ## Limitaciones conocidas
 
-- Sin login (fuera de alcance): cualquiera con el link puede ver y cargar datos, y también restablecer la demo. La base no permite borrar conteos, productos, proveedores ni recepciones de otra forma. El paso siguiente es tener usuarios por almacén.
+- Sin `05`, cualquiera con el link puede ver y cargar datos (la app lo avisa en «Más»). Con `05`, hace falta iniciar sesión y la base aplica los permisos por almacén y rol.
+- Con `05`, cada usuario pertenece a un solo almacén. Los usuarios se crean en Supabase → Authentication (no hay registro desde la app).
+- El consumo es una estimación entre conteos: sin al menos dos conteos de una presentación no hay proyección para ella.
 - Los cambios hechos desde otro celular aparecen al volver a la app o cada 30 segundos.
-- "Crear producto" desde la revisión agrega el producto al catálogo en ese momento, aunque después se cancele la recepción.
-- Si un proveedor trae un producto que no tenía asociado, al confirmar se asocia automáticamente.
+- «Crear» desde la revisión de un remito agrega el producto al catálogo en ese momento, aunque después se cancele la recepción.

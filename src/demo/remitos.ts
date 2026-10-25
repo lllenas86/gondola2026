@@ -69,6 +69,7 @@ export const REMITOS_EJEMPLO: RemitoEjemplo[] = [
     direccion: 'Av. Ficticia 1234 · Rosario',
     lineas: [
       { cantidad: 12, descripcion: 'COCA COLA 2,25 LT' },
+      { cantidad: 12, descripcion: 'COCA COLA 500 CC' },
       { cantidad: 6, descripcion: 'SPRITE LIMA-LIMON 2,25 LT' },
       { cantidad: 12, descripcion: 'AGUA MIN. S/GAS 1500 CC' },
       { cantidad: 6, descripcion: 'FANTA NARANJA 2,25 LT' },
@@ -78,6 +79,8 @@ export const REMITOS_EJEMPLO: RemitoEjemplo[] = [
       fecha: dia(0, hoy),
       lineas: [
         { descripcion: 'COCA COLA 2,25 LT', cantidad: 12, confianzaLectura: 0.98 },
+        // Otra presentación del mismo producto: se distingue por el tamaño.
+        { descripcion: 'COCA COLA 500 CC', cantidad: 12, confianzaLectura: 0.92 },
         { descripcion: 'SPRITE LIMA-LIMON 2,25 LT', cantidad: 6, confianzaLectura: 0.95 },
         // Lectura dudosa: la cantidad quedó borrosa en la foto.
         { descripcion: 'AGUA MIN. S/GAS 1500 CC', cantidad: 12, confianzaLectura: 0.6 },
