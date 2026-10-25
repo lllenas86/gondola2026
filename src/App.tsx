@@ -5,13 +5,13 @@ import { TEXTO_SIN_CONEXION } from './lib/errores';
 import { Icon, type IconName } from './components/Icon';
 import { Avisos, BannerConexion } from './components/ui';
 import { HoyPage } from './pages/HoyPage';
-import { ContarPage } from './pages/ContarPage';
+import { StockPage } from './pages/StockPage';
 import { RecepcionPage } from './pages/RecepcionPage';
 import { CatalogoPage } from './pages/CatalogoPage';
 
 const NAV: { seccion: Seccion; label: string; icon: IconName }[] = [
   { seccion: 'hoy', label: 'Hoy', icon: 'hoy' },
-  { seccion: 'contar', label: 'Contar', icon: 'contar' },
+  { seccion: 'stock', label: 'Stock', icon: 'contar' },
   { seccion: 'recepcion', label: 'Recepción', icon: 'recepcion' },
   { seccion: 'catalogo', label: 'Catálogo', icon: 'catalogo' },
 ];
@@ -55,7 +55,7 @@ function Contenido() {
       ) : (
         <main className={`app app-${ruta.seccion}`}>
           {ruta.seccion === 'hoy' && <HoyPage />}
-          {ruta.seccion === 'contar' && <ContarPage key={ruta.params.get('proveedor') ?? ''} proveedorInicial={ruta.params.get('proveedor')} />}
+          {ruta.seccion === 'stock' && <StockPage params={ruta.params} />}
           {ruta.seccion === 'recepcion' && <RecepcionPage />}
           {ruta.seccion === 'catalogo' && <CatalogoPage pestanaInicial={ruta.params.get('pestana') === 'proveedores' ? 'proveedores' : 'productos'} />}
         </main>

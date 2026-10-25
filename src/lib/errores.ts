@@ -22,6 +22,15 @@ const POR_RESTRICCION: Record<string, MensajeError> = {
   conteos_cantidad_no_negativa: { texto: 'La cantidad contada no puede ser negativa.', campo: 'cantidad' },
   lineas_cantidad_positiva: { texto: 'Cada producto recibido tiene que tener una cantidad mayor a 0.', campo: 'cantidad' },
   lineas_vinculada_con_producto: { texto: 'Hay líneas del remito sin producto asignado.' },
+  // supabase/04_presentaciones_stock_vencimientos.sql
+  productos_ficha_presentacion_unica: { texto: 'Este producto ya tiene una presentación con ese nombre.', campo: 'nombre' },
+  productos_presentacion_no_vacia: { texto: 'Escribí el nombre de la presentación (p. ej. 473 ml).', campo: 'nombre' },
+  fichas_nombre_no_vacio: { texto: 'Escribí el nombre del producto.', campo: 'nombre' },
+  productos_equivalencia_positiva: { texto: 'La equivalencia tiene que ser mayor a 0.' },
+  productos_contenido_positivo: { texto: 'El tamaño tiene que ser mayor a 0.' },
+  devolucion_lineas_cantidad_positiva: { texto: 'Cada producto a devolver tiene que tener una cantidad mayor a 0.', campo: 'cantidad' },
+  movimientos_cantidad_positiva: { texto: 'La cantidad tiene que ser mayor a 0.', campo: 'cantidad' },
+  movimientos_linea_unica: { texto: 'Esta devolución ya descontó el stock.' },
 };
 
 /** Traduce cualquier error de la base a un mensaje para el usuario. */
@@ -33,11 +42,11 @@ export function mensajeError(e: unknown): MensajeError {
       return { texto: 'La clave de Supabase no es válida. Revisá las variables en Vercel.', sinConexion: true };
     }
     if (e.codigo === 'PGRST205' || e.codigo === '42P01') {
-      return { texto: 'Faltan tablas en la base: hay que correr supabase/01_esquema.sql.', sinConexion: true };
+      return { texto: 'Faltan tablas en la base: hay que correr los archivos de supabase/ (01 a 04) en el SQL Editor.', sinConexion: true };
     }
     // Función o columna nueva que todavía no se creó en la base
     if (e.codigo === 'PGRST202' || e.codigo === 'PGRST204' || e.codigo === '42883' || e.codigo === '42703') {
-      return { texto: 'Falta actualizar la base: corré supabase/03_pedido_y_demo.sql en Supabase → SQL Editor.' };
+      return { texto: 'Falta actualizar la base: corré supabase/03_pedido_y_demo.sql y supabase/04_presentaciones_stock_vencimientos.sql en Supabase → SQL Editor.' };
     }
     for (const [restriccion, msg] of Object.entries(POR_RESTRICCION)) {
       if (e.message.includes(restriccion)) return msg;

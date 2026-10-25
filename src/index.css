@@ -383,3 +383,95 @@ img { max-width: 100%; display: block; }
 .tarjeta-reset { margin-top: 16px; }
 .tarjeta-reset .btn { margin-top: 10px; }
 .acciones-2.sin-margen-arriba { margin-top: 0; }
+
+/* ---------- Presentaciones (ficha única de producto) ---------- */
+.subtitulo-form { font-size: 16px; margin: 8px 0 2px; color: var(--azul-oscuro); }
+.nota-form { margin-bottom: 10px; }
+.lista-presentaciones { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 12px; }
+.presentacion { border: 1.5px solid var(--borde); border-radius: var(--radio); padding: 12px 14px 6px; background: #fbfcfe; }
+.presentacion-cabecera { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.presentacion-cabecera .etiqueta { margin-top: 0; }
+.campo-doble { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.checklist-compacta .check-item { min-height: 40px; }
+.presentacion > .btn { margin: 8px 0; }
+.lista-presentaciones-mini { list-style: none; padding: 0; margin: 2px 0 0; display: grid; gap: 2px; }
+.lista-datos { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 15px; }
+.tarjeta-nota-suave { background: var(--azul-claro); border-color: var(--azul-borde); }
+.alerta-roja { display: flex; gap: 10px; align-items: flex-start; background: var(--rojo-fondo); border: 1.5px solid var(--rojo-borde); color: var(--rojo); border-radius: 12px; padding: 12px; font-weight: 600; margin-bottom: 16px; }
+.alerta-compacta { margin-bottom: 10px; padding: 8px 12px; }
+.check-confirmar { border-bottom: none; font-weight: 650; margin-top: 8px; }
+.etiqueta-verde { background: var(--verde-fondo); color: var(--verde); border-color: #86efac; }
+.boton-tablero { margin-top: 10px; }
+
+/* ---------- Stock ---------- */
+.pestanas-4 { grid-template-columns: repeat(4, 1fr); }
+.pestanas-4 button { font-size: 13.5px; padding: 0 2px; line-height: 1.15; }
+.pestanas-4 .contador-pestana { margin-left: 2px; background: var(--rojo-fondo); color: var(--rojo); }
+.pestanas-tipo { margin-bottom: 8px; }
+.fila-herramientas-1 { grid-template-columns: 1fr; margin-bottom: 8px; }
+.fila-filtros { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.chips-compactos { margin-bottom: 0; }
+.chips-compactos .chip { min-height: 40px; padding: 6px 12px; font-size: 14px; }
+.select-filtro { min-height: 40px; border: 1.5px solid var(--borde); border-radius: 999px; background: #fff; padding: 0 12px; font-size: 14px; max-width: 100%; }
+.grupo-ficha { list-style: none; }
+.grupo-ficha-titulo { font-weight: 700; color: var(--azul-oscuro); margin: 6px 2px 6px; }
+.grupo-ficha > .lista-conteo { gap: 8px; }
+.fila-conteo-campos + .fila-conteo-campos { margin-top: 8px; }
+.fila-conteo .btn-link { margin-top: 8px; }
+
+.tabla-scroll { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--borde); border-radius: var(--radio); background: #fff; }
+.tabla-diferencias { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.tabla-diferencias th { text-align: left; font-size: 12.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--suave); background: #f6f8fc; padding: 8px 10px; }
+.tabla-diferencias td { padding: 9px 10px; border-top: 1px solid var(--borde); vertical-align: top; }
+.tabla-diferencias td:not(:first-child), .tabla-diferencias th:not(:first-child) { text-align: right; white-space: nowrap; }
+.dif-negativa { color: var(--rojo); font-weight: 700; }
+.dif-positiva { color: var(--azul); font-weight: 700; }
+.dif-cero { color: var(--verde); font-weight: 650; }
+
+.item-historial { padding: 0; }
+.item-historial + .item-historial { border-top: 1px solid var(--borde); }
+.item-historial details { padding: 12px 14px; }
+.item-historial summary { cursor: pointer; list-style: revert; }
+.item-historial .tabla-scroll { margin: 10px 0 4px; }
+
+.tablero { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+.tablero-item { display: grid; gap: 2px; text-align: left; background: #fff; border: 1.5px solid var(--borde); border-radius: var(--radio); padding: 12px 14px; font: inherit; color: inherit; }
+.tablero-item strong { font-size: 28px; line-height: 1.1; }
+.tablero-item span { font-weight: 650; font-size: 14.5px; }
+.tablero-item small { color: var(--suave); font-size: 13px; }
+.tablero-item.rojo { background: var(--rojo-fondo); border-color: var(--rojo-borde); color: var(--rojo); }
+.tablero-item.ambar { background: var(--ambar-fondo); border-color: #fcd9a0; color: var(--ambar); }
+.tablero-boton { cursor: pointer; }
+.tarjeta-lote { border-left-width: 5px; }
+.lote-vencido { border-left-color: var(--rojo); }
+.lote-por-vencer { border-left-color: var(--amarillo-borde); }
+.tarjeta-lote .tarjeta-cabecera .etiqueta { flex-shrink: 0; margin-top: 0; }
+.accion-sugerida { display: flex; gap: 6px; align-items: flex-start; font-size: 14.5px; color: #334155; background: #f6f8fc; border-radius: 10px; padding: 8px 10px; margin: 6px 0 8px; }
+.accion-sugerida svg { flex-shrink: 0; margin-top: 2px; color: var(--azul); }
+.acciones-lote { display: flex; flex-wrap: wrap; gap: 8px; }
+.item-boton { width: 100%; border: none; background: transparent; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.hoja-pie .barra-error { margin-bottom: 8px; }
+
+/* ---------- Remito de devolución ---------- */
+.remito { background: #fff; border: 1px solid var(--borde); border-radius: var(--radio); padding: 16px; margin-bottom: 12px; font-size: 14.5px; }
+.remito-cabecera { display: flex; justify-content: space-between; gap: 12px; border-bottom: 2px solid var(--texto); padding-bottom: 8px; margin-bottom: 10px; }
+.remito-titulo { font-weight: 800; font-size: 16.5px; }
+.remito-sub { color: var(--suave); font-size: 12.5px; }
+.remito-numero { display: grid; text-align: right; font-weight: 700; white-space: nowrap; }
+.remito-datos { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin: 0 0 12px; }
+.remito-datos dt { font-size: 12px; color: var(--suave); }
+.remito-datos dd { margin: 0; font-weight: 600; }
+.remito-tabla { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.remito-tabla th, .remito-tabla td { border: 1px solid #cbd5e1; padding: 6px 7px; text-align: left; vertical-align: top; }
+.remito-tabla th { background: #f1f5f9; font-size: 12px; }
+.remito-tabla .num { text-align: right; white-space: nowrap; }
+.remito-firmas { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 44px; font-size: 12.5px; color: var(--suave); }
+.remito-firmas div { border-top: 1px solid var(--texto); padding-top: 4px; }
+.remito-aviso { margin-top: 18px; font-size: 12px; color: var(--suave); border-top: 1px dashed #94a3b8; padding-top: 8px; }
+
+@media print {
+  body.imprimiendo-remito * { visibility: hidden !important; }
+  body.imprimiendo-remito .remito, body.imprimiendo-remito .remito * { visibility: visible !important; }
+  body.imprimiendo-remito .remito { position: absolute; left: 0; top: 0; width: 100%; border: none; margin: 0; padding: 0; }
+  body.imprimiendo-remito .hoja, body.imprimiendo-remito .hoja-fondo, body.imprimiendo-remito .hoja-cuerpo { position: static !important; overflow: visible !important; max-height: none !important; box-shadow: none !important; background: none !important; transform: none !important; }
+}

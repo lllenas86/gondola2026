@@ -15,8 +15,6 @@ import type { AppData, FilaStock, Producto, Proveedor } from '../types';
 //   3. Por vencer                ← v_vencimientos (7 días)
 //   4. Sin contar hace +7 días   ← v_stock_actual.conteo_desactualizado
 
-const TODOS = '__todos__';
-
 interface Visita {
   proveedor: Proveedor;
   fecha: Date;
@@ -63,6 +61,7 @@ function armarFaltantes(data: AppData, filas: FilaStock[], hoy: Date): GrupoFalt
 
 export function HoyPage() {
   const { data, vistas } = useStore();
+  const vencidos = vistas.lotes.filter((l) => l.estado === 'vencido').length;
   const [pedidoDe, setPedidoDe] = useState<Proveedor | null>(null);
   const ahora = new Date();
   const hoy = startOfDay(ahora);
@@ -126,6 +125,11 @@ export function HoyPage() {
       {/* 3. Por vencer (7 días) */}
       <section className="seccion" aria-labelledby="titulo-vencer">
         <h2 className="seccion-titulo" id="titulo-vencer">Por vencer</h2>
+        {vencidos > 0 && (
+          <p className="alerta-roja alerta-compacta" role="status">
+            <Icon name="alerta" size={18} /> {vencidos === 1 ? 'Hay 1 lote vencido' : `Hay ${vencidos} lotes vencidos`} en stock.
+          </p>
+        )}
         {vistas.vencimientos.length === 0 ? (
           <p className="texto-suave nota-seccion">Nada vence en los próximos 7 días.</p>
         ) : (
@@ -143,6 +147,9 @@ export function HoyPage() {
             ))}
           </ul>
         )}
+        <button type="button" className="btn btn-secundario btn-bloque boton-tablero" onClick={() => irA('stock', { pestana: 'vencimientos' })}>
+          <Icon name="hoja" /> Ver vencimientos y devoluciones
+        </button>
       </section>
 
       {/* 4. Sin contar hace +7 días */}
@@ -162,7 +169,7 @@ export function HoyPage() {
                       {s.fechaUltimoConteo ? `Contado ${haceCuanto(s.fechaUltimoConteo, ahora)} (${formatFechaCorta(s.fechaUltimoConteo)})` : 'Nunca se contó'}
                     </p>
                   </div>
-                  <button type="button" className="btn btn-secundario btn-chico" onClick={() => irA('contar', { proveedor: prov?.id ?? TODOS })}>
+                  <button type="button" className="btn btn-secundario btn-chico" onClick={() => irA('stock', prov ? { proveedor: prov.id } : undefined)}>
                     Contar
                   </button>
                 </li>
@@ -241,7 +248,7 @@ function TarjetaFalta({ grupo, ahora, onPedido }: { grupo: GrupoFalta; ahora: Da
       </ul>
       {visita ? (
         <div className="acciones-2">
-          <button type="button" className="btn btn-secundario" onClick={() => irA('contar', { proveedor: visita.proveedor.id })}>
+          <button type="button" className="btn btn-secundario" onClick={() => irA('stock', { proveedor: visita.proveedor.id })}>
             <Icon name="contar" /> Contar
           </button>
           <button type="button" className="btn btn-primario" onClick={() => onPedido(visita.proveedor)}>
@@ -280,7 +287,7 @@ function TarjetaProveedor({ proveedor, cuando, data, ahora, onPedido }: { provee
           ))}
         </ul>
       )}
-      <button type="button" className="btn btn-primario btn-bloque" onClick={() => irA('contar', { proveedor: proveedor.id })}>
+      <button type="button" className="btn btn-primario btn-bloque" onClick={() => irA('stock', { proveedor: proveedor.id })}>
         <Icon name="contar" /> Contar productos de este proveedor
       </button>
       {productos.length > 0 && (

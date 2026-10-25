@@ -1,28 +1,29 @@
 import { useState } from 'react';
 import { useStore } from '../state/store';
 import { formatDias } from '../lib/dates';
-import { productosDeProveedor, proveedoresDeProducto } from '../lib/stock';
+import { detallePresentacion, fichasConPresentaciones, productosDeProveedor, proveedoresDeProducto } from '../lib/stock';
 import { irA } from '../lib/router';
 import { Icon } from '../components/Icon';
 import { EstadoConexion, Vacio } from '../components/ui';
-import { ProductoForm } from '../features/ProductoForm';
+import { FichaForm } from '../features/FichaForm';
 import { ProveedorForm } from '../features/ProveedorForm';
 import { BotonRestablecerDemo } from '../features/RestablecerDemo';
-import type { Producto, Proveedor } from '../types';
+import type { Ficha, Proveedor } from '../types';
 
 type Pestana = 'productos' | 'proveedores';
 
 export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
   const { data } = useStore();
   const pestana = pestanaInicial;
-  const [editandoProducto, setEditandoProducto] = useState<Producto | 'nuevo' | null>(null);
+  const [editandoProducto, setEditandoProducto] = useState<Ficha | 'nuevo' | null>(null);
   const [editandoProveedor, setEditandoProveedor] = useState<Proveedor | 'nuevo' | null>(null);
   const [busqueda, setBusqueda] = useState('');
 
   const q = busqueda.trim().toLowerCase();
-  const productos = [...data.productos]
-    .filter((p) => !q || p.nombre.toLowerCase().includes(q))
-    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const todasLasFichas = fichasConPresentaciones(data);
+  const fichas = todasLasFichas.filter(
+    (f) => !q || f.ficha.nombre.toLowerCase().includes(q) || f.presentaciones.some((p) => p.nombre.toLowerCase().includes(q)),
+  );
   const proveedores = [...data.proveedores]
     .filter((p) => !q || p.nombre.toLowerCase().includes(q))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
@@ -37,7 +38,7 @@ export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
 
       <div className="pestanas" role="tablist">
         <button type="button" role="tab" aria-selected={pestana === 'productos'} className={pestana === 'productos' ? 'activo' : ''} onClick={() => irA('catalogo')}>
-          Productos <span className="contador-pestana">{data.productos.length}</span>
+          Productos <span className="contador-pestana">{todasLasFichas.length}</span>
         </button>
         <button type="button" role="tab" aria-selected={pestana === 'proveedores'} className={pestana === 'proveedores' ? 'activo' : ''} onClick={() => irA('catalogo', { pestana: 'proveedores' })}>
           Proveedores <span className="contador-pestana">{data.proveedores.length}</span>
@@ -64,25 +65,31 @@ export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
 
       {pestana === 'productos' && (
         <ul className="lista-catalogo">
-          {productos.length === 0 && <Vacio titulo={q ? 'No hay productos con ese nombre.' : 'Todavía no hay productos.'} />}
-          {productos.map((p) => {
-            const provs = proveedoresDeProducto(data, p.id);
-            return (
-              <li key={p.id}>
-                <button type="button" className="item-catalogo" onClick={() => setEditandoProducto(p)}>
-                  <div>
-                    <p className="item-titulo">{p.nombre}</p>
-                    <p className="texto-suave">
-                      {p.unidad} · punto de pedido {p.puntoDePedido}
-                      {provs.length > 0 ? ` · ${provs.map((x) => x.nombre).join(', ')}` : ' · sin proveedor'}
-                    </p>
-                    {p.perecedero && <span className="etiqueta etiqueta-violeta"><Icon name="hoja" size={13} /> Perecedero</span>}
-                  </div>
-                  <Icon name="lapiz" className="icono-suave" />
-                </button>
-              </li>
-            );
-          })}
+          {fichas.length === 0 && <Vacio titulo={q ? 'No hay productos con ese nombre.' : 'Todavía no hay productos.'} />}
+          {fichas.map(({ ficha, presentaciones }) => (
+            <li key={ficha.id}>
+              <button type="button" className="item-catalogo" onClick={() => setEditandoProducto(ficha)}>
+                <div>
+                  <p className="item-titulo">{ficha.nombre}</p>
+                  <ul className="lista-presentaciones-mini">
+                    {presentaciones.map((p) => {
+                      const provs = proveedoresDeProducto(data, p.id);
+                      const det = detallePresentacion(p);
+                      return (
+                        <li key={p.id} className="texto-suave">
+                          <strong>{p.presentacion}</strong>
+                          {det ? ` (${det})` : ''} · {p.unidad} · punto de pedido {p.puntoDePedido}
+                          {provs.length > 0 ? ` · ${provs.map((x) => x.nombre).join(', ')}` : ' · sin proveedor'}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {presentaciones[0].perecedero && <span className="etiqueta etiqueta-violeta"><Icon name="hoja" size={13} /> Perecedero</span>}
+                </div>
+                <Icon name="lapiz" className="icono-suave" />
+              </button>
+            </li>
+          ))}
         </ul>
       )}
 
@@ -115,7 +122,7 @@ export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
       <BotonRestablecerDemo />
 
       {editandoProducto && (
-        <ProductoForm producto={editandoProducto === 'nuevo' ? null : editandoProducto} onCerrar={() => setEditandoProducto(null)} />
+        <FichaForm ficha={editandoProducto === 'nuevo' ? null : editandoProducto} onCerrar={() => setEditandoProducto(null)} />
       )}
       {editandoProveedor && (
         <ProveedorForm proveedor={editandoProveedor === 'nuevo' ? null : editandoProveedor} onCerrar={() => setEditandoProveedor(null)} />

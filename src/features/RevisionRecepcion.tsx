@@ -96,17 +96,22 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
       document.querySelector('.con-error, .campo-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
-    // Se agrupan líneas repetidas del mismo producto.
-    const agrupadas = new Map<string, { cantidad: number; fechaVencimiento?: string }>();
+    // Se agrupan líneas repetidas de la misma presentación y el mismo vencimiento.
+    // Distintas fechas de vencimiento quedan como lotes separados.
+    const porLote = new Map<string, { productoId: string; cantidad: number; fechaVencimiento?: string }>();
     for (const l of r.lineas) {
-      const prev = agrupadas.get(l.productoId);
-      agrupadas.set(l.productoId, {
+      const k = `${l.productoId}|${l.fechaVencimiento ?? ''}`;
+      const prev = porLote.get(k);
+      porLote.set(k, {
+        productoId: l.productoId,
         cantidad: (prev?.cantidad ?? 0) + l.cantidad,
-        fechaVencimiento: [prev?.fechaVencimiento, l.fechaVencimiento].filter(Boolean).sort()[0],
+        ...(l.fechaVencimiento ? { fechaVencimiento: l.fechaVencimiento } : {}),
       });
     }
+    const agrupadas = new Map<string, { cantidad: number }>();
+    for (const v of porLote.values()) agrupadas.set(v.productoId, { cantidad: (agrupadas.get(v.productoId)?.cantidad ?? 0) + v.cantidad });
     const lineasConfirmar: LineaAConfirmar[] = [
-      ...[...agrupadas].map(([productoId, v]) => ({ productoId, cantidad: v.cantidad, ...(v.fechaVencimiento ? { fechaVencimiento: v.fechaVencimiento } : {}) })),
+      ...[...porLote.values()].map((v) => ({ productoId: v.productoId, cantidad: v.cantidad, ...(v.fechaVencimiento ? { fechaVencimiento: v.fechaVencimiento } : {}) })),
       // Las líneas ignoradas quedan registradas (no suman al stock)
       ...lineas
         .filter((l) => l.ignorada && l.descripcion)

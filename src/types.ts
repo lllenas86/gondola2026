@@ -8,12 +8,35 @@ export type DiaSemana = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export type Unidad = 'unidad' | 'kg' | 'litro' | 'paquete' | 'caja';
 
+/** Unidad del tamaño de una presentación (473 ml, 1 l, 500 g…). */
+export type UnidadContenido = 'ml' | 'l' | 'g' | 'kg' | 'unidad';
+
+/** Ficha única de producto (p. ej. "Cerveza Quilmes"). Agrupa sus presentaciones. */
+export interface Ficha {
+  id: string;
+  nombre: string;
+  /** Quedó sin presentaciones porque se movieron a otra ficha */
+  archivada: boolean;
+}
+
+/**
+ * Presentación de una ficha (p. ej. "473 ml"). Es lo que se cuenta, se recibe, se pide
+ * y se devuelve: el stock se lleva por presentación. En la base es la tabla `productos`.
+ * `nombre` es el nombre completo para mostrar ("Cerveza Quilmes 473 ml").
+ */
 export interface Producto {
   id: string;
   nombre: string;
   unidad: Unidad;
   perecedero: boolean;
   puntoDePedido: number;
+  fichaId: string;
+  /** Nombre de la presentación dentro de la ficha. «Única» si la ficha tiene una sola. */
+  presentacion: string;
+  contenido?: number;
+  unidadContenido?: UnidadContenido;
+  /** Equivalencia: unidades sueltas que trae (pack x6 = 6). */
+  unidadesPorPresentacion: number;
 }
 
 export interface Proveedor {
@@ -38,6 +61,58 @@ export interface Conteo {
   fechaHora: string;
   /** AAAA-MM-DD, solo perecederos */
   fechaVencimiento?: string;
+  /** Sesión de conteo (los conteos anteriores a la migración 04 no tienen) */
+  sesionId?: string;
+  /** Stock que esperaba el sistema justo antes de contar */
+  stockEsperado?: number;
+}
+
+export interface SesionConteo {
+  id: string;
+  tipo: 'inicial' | 'periodico';
+  notas?: string;
+  creadaEn: string;
+}
+
+export type EstadoDevolucion = 'preparada' | 'entregada' | 'resuelta' | 'cancelada';
+export type RespuestaProveedor = 'pendiente' | 'aceptada' | 'rechazada';
+export type MotivoDevolucion = 'vencido' | 'proximo_a_vencer' | 'danado' | 'otro';
+
+export interface LineaDevolucion {
+  id: number;
+  productoId: string;
+  cantidad: number;
+  fechaVencimiento?: string;
+  recepcionId?: string;
+}
+
+export interface Devolucion {
+  id: string;
+  numero: number;
+  proveedorId: string;
+  tipo: 'devolucion' | 'cambio';
+  motivo: MotivoDevolucion;
+  nota?: string;
+  estado: EstadoDevolucion;
+  respuestaProveedor: RespuestaProveedor;
+  resolucion?: string;
+  fecha: string;
+  creadaEn: string;
+  entregadaEn?: string;
+  resueltaEn?: string;
+  lineas: LineaDevolucion[];
+}
+
+/** Salida de stock: devolución entregada o baja por descarte. */
+export interface Movimiento {
+  id: string;
+  productoId: string;
+  tipo: 'devolucion' | 'baja';
+  cantidad: number;
+  fechaVencimiento?: string;
+  motivo?: string;
+  devolucionLineaId?: number;
+  fechaHora: string;
 }
 
 export interface LineaRecepcion {
@@ -86,12 +161,16 @@ export interface Borrador {
 }
 
 export interface AppData {
+  fichas: Ficha[];
   productos: Producto[];
   proveedores: Proveedor[];
   productoProveedor: ProductoProveedor[];
   conteos: Conteo[];
   recepciones: Recepcion[];
   borradores: Borrador[];
+  sesiones: SesionConteo[];
+  devoluciones: Devolucion[];
+  movimientos: Movimiento[];
 }
 
 // ---- Filas de las vistas de la base ----
@@ -131,8 +210,23 @@ export interface FilaConsumo {
   dias: number;
 }
 
+export type EstadoLote = 'vencido' | 'por_vencer' | 'vigente' | 'sin_fecha';
+
+/** Lote (partida) vivo de una presentación: misma fecha de vencimiento (vista v_lotes). */
+export interface Lote {
+  productoId: string;
+  fechaVencimiento: string | null;
+  cantidad: number;
+  /** Recepción más reciente que aportó a este lote, si vino de una recepción */
+  recepcionId: string | null;
+  origen: 'conteo' | 'recepcion';
+  diasParaVencer: number | null;
+  estado: EstadoLote;
+}
+
 export interface Vistas {
   stock: FilaStock[];
+  lotes: Lote[];
   visitas: FilaVisita[];
   vencimientos: FilaVencimiento[];
   consumo: FilaConsumo[];
