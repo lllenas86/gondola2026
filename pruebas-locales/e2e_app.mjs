@@ -1,9 +1,10 @@
-// Prueba de punta a punta del MODO DEMO (navegador real). Uso: npm run build -- --mode demo --outDir dist-demo,
-// npx vite preview --mode demo --outDir dist-demo --port 4173, y en otra terminal: node e2e_demo.mjs
+// Prueba de punta a punta de la APP FINAL con login real (cuentas de evaluación) y permisos de la base.
+// Base local: ./base_final.sh (01→04, datos de ejemplo, 05, cuentas, 06). App: compilada contra el servidor de
+// prueba (VITE_SUPABASE_URL=http://localhost:8787) y servida por mini-postgrest (./servidor.sh). Uso: node e2e_app.mjs
 // Requiere: npm i puppeteer-core @sparticuz/chromium (solo Linux) o adaptar a Playwright.
 import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
-const BASE = 'http://localhost:4173/';
+const BASE = 'http://localhost:8787/';
 const res = []; const ok = (n, c, d = '') => { res.push({ n, ok: !!c, d: c ? '' : String(d).slice(0, 220) }); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const b = await puppeteer.launch({ args: chromium.args, executablePath: await chromium.executablePath(), headless: true, defaultViewport: { width: 390, height: 844 } });
@@ -17,17 +18,17 @@ const click = async (texto, scope = 'body', sel = 'button,a,[role=tab]') => { co
 const fill = async (sel, v) => { const r = await ev((sel, v) => { const el = document.querySelector(sel); if (!el) return 'no existe ' + sel; const proto = el.tagName === 'SELECT' ? HTMLSelectElement.prototype : el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); return 'ok'; }, sel, v); if (r !== 'ok') throw new Error(r); await sleep(120); };
 const selectText = async (sel, t) => { const v = await ev((sel, t) => { const el = document.querySelector(sel); const o = el && [...el.options].find((o) => o.text.includes(t)); return o ? o.value : null; }, sel, t); if (v === null) throw new Error(`opción "${t}" no está en ${sel}`); await fill(sel, v); };
 const selectFirst = async (sel) => { const v = await ev((sel) => { const el = document.querySelector(sel); const o = el && [...el.options].find((o) => o.value && !o.disabled); return o ? o.value : null; }, sel); if (!v) throw new Error('sin opciones en ' + sel); await fill(sel, v); return v; };
-const api = (path, init = {}) => ev(async (path, init) => { const s = JSON.parse(localStorage.getItem('gondola.sesion') || 'null'); const tok = s?.access_token || s?.accessToken || s?.token; const h = { apikey: 'x', 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }; const r = await fetch('https://demo.gondola.invalid/rest/v1/' + path, { ...init, headers: h }); const t = await r.text(); return { s: r.status, b: t ? JSON.parse(t) : null }; }, path, init);
+const api = (path, init = {}) => ev(async (path, init) => { const s = JSON.parse(localStorage.getItem('gondola.sesion') || 'null'); const tok = s?.access_token || s?.accessToken || s?.token; const h = { apikey: 'test', 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }; const r = await fetch('/rest/v1/' + path, { ...init, headers: h }); const t = await r.text(); return { s: r.status, b: t ? JSON.parse(t) : null }; }, path, init);
 const ir = async (h) => { await p.goto(BASE + '#/' + h); await sleep(700); };
 const paso = async (n, fn) => { try { await fn(); } catch (e) { ok(n, false, e.message); } };
 const dlg = (label) => ev((label) => { const ds = [...document.querySelectorAll('[role=dialog]')]; const d = label ? ds.find((x) => (x.getAttribute('aria-label') || '').startsWith(label)) : ds.pop(); return d?.innerText || ''; }, label);
 const stockDe = async (id) => (await api(`v_stock_presentacion?select=stock_actual&presentacion_id=eq.${id}`)).b?.[0]?.stock_actual;
-const login = async (email) => { await ev(() => localStorage.removeItem('gondola.sesion')); await p.goto(BASE + '?r=' + Date.now()); await until(() => document.body.innerText.includes('Usuarios de prueba (datos ficticios)'), [], 90000); await sleep(300); await click(email, 'body', 'button'); await click('Ingresar', 'form', 'button'); await until(() => !document.body.innerText.includes('Usuarios de prueba'), [], 15000); await sleep(1000); };
+const login = async (email) => { await ev(() => localStorage.removeItem('gondola.sesion')); await p.goto(BASE + '?r=' + Date.now()); await until(() => document.body.innerText.includes('Acceso rápido para evaluación'), [], 90000); await sleep(300); await click(email, 'body', 'button'); await until(() => !document.body.innerText.includes('Acceso rápido para evaluación'), [], 15000); await sleep(1000); };
 
 await p.goto(BASE);
-ok('Demo arranca (base en el navegador)', await hasText('Usuarios de prueba (datos ficticios)', 90000), (await txt()).slice(0, 200));
-ok('Indicador MODO DEMO visible', (await txt()).includes('MODO DEMO · DATOS DE PRUEBA'));
-await paso('Login dueña desde "Usuarios de prueba"', async () => { await login('duena@demo.ar'); const t = await txt(); ok('Login dueña desde "Usuarios de prueba"', !t.includes('Ingresá a tu almacén'), t.slice(0, 150)); });
+ok('La app pide ingresar y ofrece el acceso rápido para evaluación', await hasText('Acceso rápido para evaluación', 90000), (await txt()).slice(0, 200));
+ok('Sin cartel de modo demo', !(await txt()).includes('MODO DEMO'));
+await paso('Login dueña desde el acceso rápido', async () => { await login('duena.gondola@example.com'); const t = await txt(); ok('Login dueña desde el acceso rápido', !t.includes('Ingresá a tu almacén'), t.slice(0, 150)); });
 
 await paso('Menú: "Stock" en lugar de "Contar"', async () => { await ir('mas'); await until(() => (document.querySelector('main')?.innerText || '').includes('Catálogo'), [], 15000); const t = await ev(() => (document.querySelector('nav')?.innerText || '') + ' | ' + (document.querySelector('main')?.innerText || '')); ok('Menú: "Stock" en lugar de "Contar"', t.includes('Stock') && !/\bContar\b/.test(t), t.replace(/\s+/g, ' ').slice(0, 200)); });
 await paso('Pantalla del módulo: "Conteo de stock"', async () => { await ir('contar'); ok('Pantalla del módulo: "Conteo de stock"', await hasText('Conteo de stock'), (await txt()).slice(0, 200)); });
@@ -113,7 +114,7 @@ await paso('C5 Registrar qué hizo el proveedor (trazable)', async () => { await
   ok('C5 Registrar qué hizo el proveedor (trazable)', d?.estado === 'resuelta' && enLista > 0, JSON.stringify({ d, enLista })); });
 await paso('C6 La baja es una operación aparte', async () => { const bajasAntes = (await api('bajas?select=id')).b.length; const devs = (await api('devoluciones?select=id')).b.length; await ir('vencimientos?pestana=bajas'); const t = await txt(); ok('C6 La baja es una operación aparte', t.includes('Nueva baja') && devs >= 1, `devoluciones=${devs} bajas=${bajasAntes}`); });
 
-await paso('Empleado ve "Stock" en su barra', async () => { await login('empleado@demo.ar'); const nav = (await ev(() => document.querySelector('nav')?.innerText || '')).replace(/\s+/g, ' '); ok('Empleado ve "Stock" en su barra', nav.includes('Stock') && !nav.includes('Contar'), nav); });
+await paso('Empleado ve "Stock" en su barra', async () => { await login('empleado.gondola@example.com'); const nav = (await ev(() => document.querySelector('nav')?.innerText || '')).replace(/\s+/g, ' '); ok('Empleado ve "Stock" en su barra', nav.includes('Stock') && !nav.includes('Contar'), nav); });
 ok('Sin errores de JavaScript en la página', errs.length === 0, errs.join(' | '));
 await b.close();
 console.log(res.map((r) => `${r.ok ? 'PASA ' : 'FALLA'} · ${r.n}${r.d ? ' → ' + r.d : ''}`).join('\n'));

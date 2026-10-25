@@ -45,12 +45,12 @@ Reglas en la base: el stock nunca se guarda; la devolución descuenta una sola v
    from v_stock_actual a join v_stock_presentacion b on b.producto_id = a.producto_id
    where a.stock_actual is distinct from b.stock_actual;
    ```
-4. Publicar la versión nueva de la app (sección 5). Opcional: **Restablecer demo** para cargar la demo nueva con presentaciones y lotes (borra lo cargado).
+4. Publicar la versión nueva de la app (sección 5).
 5. **Solo cuando quieran usuarios**: correr **`supabase/05_roles_y_almacenes.sql`**, crear los usuarios en Authentication → Users (email + contraseña, «Auto Confirm User») y asignar el primer dueño:
    ```sql
    select gondola_asignar_primer_dueno('tu-email@ejemplo.com');
    ```
-   El resto se agrega desde la app (Más → Equipo). Desde ese momento **el link público deja de mostrar datos sin login**: para la demo de la clase, creá un usuario por rol.
+   El resto se agrega desde la app (Más → Equipo). Desde ese momento **el link público deja de mostrar datos sin login**. Para la evaluación: crear las tres cuentas `duena/encargado/empleado.gondola@example.com` (clave `demo1234`, Auto Confirm) y correr **`supabase/06_cuentas_evaluacion.sql`**.
 
 Las dos migraciones se pueden volver a correr sin duplicar nada, y volver a correr la 04 después de la 05 no reabre el acceso público (probado).
 
@@ -105,3 +105,13 @@ Pruebas re-ejecutadas el 25/10 sobre esta versión (Postgres 16 local + API simu
 - typecheck y build (normal y demo): OK. El build normal no incluye PGlite ni el cartel de demo; el build demo no incluye las variables de `.env.local`.
 - `npm test`: 15/15 · `e2e_migracion.py`: 16/16 (también por el camino real: 04 alternativa → reversión → 04) · `e2e_flujos.py`: 32/32 · `e2e_demo.mjs`: 27/27 · `e2e_roles.py` (local, con 05): 22/22 · `e2e_recarga.py` (nuevo): 4/4.
 - Ajustes solo en las pruebas (no en la app): fechas fijas que dependían del día (8a, A9), textos tras el renombre a «Stock» (2e, 3c, R4, R14) y `usuarios_prueba.sql` (encargado y empleado asociados al almacén). Para `e2e_roles.py` la base se arma así: `reset_db.sh 04` → `select gondola_restablecer_demo()` → correr 05 → `usuarios_prueba.sql`.
+
+## 8. App final única · 25/10/2026
+
+- Se quitó el modo demo de la experiencia: sin cartel «MODO DEMO», sin backend simulado (PGlite desinstalado), sin usuarios ficticios ni botón de reinicio. `npm run dev` / `npm run build` dan la app completa contra Supabase.
+- Login real (Supabase Auth) con los tres perfiles de la versión avanzada. En la pantalla de ingreso, **Acceso rápido para evaluación**: un toque entra como Dueña, Encargado o Empleado (cuentas reales, clave `demo1234`).
+- `06_cuentas_evaluacion.sql`: asigna los roles a esas cuentas, impide modificarlas desde Equipo y deja el reinicio de datos solo para el SQL Editor.
+- `mantenimiento/recuperar_acceso_sin_login.sql`: plan B si tras la 05 nadie puede entrar (no borra datos; probado ida y vuelta).
+- Orden en producción: crear las 3 cuentas → respaldo → 05 + 06 → publicar esta versión (la 05 corta el acceso sin login de la versión publicada anterior).
+
+Pruebas sobre esta versión (Postgres 16 local + API simulada con RLS real): typecheck y build OK · `npm test` 15/15 · `e2e_app.mjs` 27/27 · `e2e_evaluacion.py` 25/25 (acceso rápido, permisos por rol verificados en la base, cuentas protegidas, reinicio bloqueado, recargas, dos pestañas) · `e2e_roles.py` 22/22 · `e2e_migracion.py` 16/16 · `e2e_flujos.py` 32/32 · `e2e_recarga.py` 4/4 · 05+06 conservan datos y stock idénticos (checksum) y son re-ejecutables. Se retiraron `e2e_demo.mjs` y `e2e_demo_login.py` (probaban el modo demo eliminado).

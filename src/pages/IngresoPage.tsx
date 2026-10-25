@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { CLAVE_DEMO, USUARIOS_DEMO } from '../demo/usuarios';
+import { CLAVE_EVALUACION, CUENTAS_EVALUACION } from '../lib/evaluacion';
 import { useStore } from '../state/store';
 import { Campo } from '../components/ui';
 import { Icon } from '../components/Icon';
@@ -12,15 +12,26 @@ export function IngresoPage() {
   const [error, setError] = useState<string | null>(null);
   const [entrando, setEntrando] = useState(false);
 
-  const enviar = async (e: FormEvent) => {
-    e.preventDefault();
+  const entrar = async (mail: string, clave: string) => {
     if (entrando) return;
-    if (!email.trim() || !password) { setError('Completá el email y la contraseña.'); return; }
+    if (!mail.trim() || !clave) { setError('Completá el email y la contraseña.'); return; }
     setEntrando(true);
     setError(null);
-    const r = await ingresar(email, password);
+    const r = await ingresar(mail, clave);
     setEntrando(false);
     if (r) setError(r.texto);
+  };
+
+  const enviar = (e: FormEvent) => {
+    e.preventDefault();
+    void entrar(email, password);
+  };
+
+  /** Acceso rápido: completa los datos de la cuenta de evaluación y entra. */
+  const accesoRapido = (mail: string) => {
+    setEmail(mail);
+    setPassword(CLAVE_EVALUACION);
+    void entrar(mail, CLAVE_EVALUACION);
   };
 
   // Con sesión pero sin almacén asignado
@@ -56,21 +67,19 @@ export function IngresoPage() {
         </button>
         <p className="texto-suave nota-seccion">Los usuarios los crea el dueño del almacén. Si no tenés uno, pedíselo.</p>
       </form>
-      {import.meta.env.VITE_DEMO === '1' && (
-        <section className="tarjeta" aria-label="Usuarios de prueba">
-          <h2 className="tarjeta-titulo">Usuarios de prueba (datos ficticios)</h2>
-          <p className="texto-suave">Tocá uno para completar el ingreso. Todos usan la clave <strong>{CLAVE_DEMO}</strong>.</p>
-          <ul className="lista-catalogo">
-            {USUARIOS_DEMO.map((u) => (
-              <li key={u.email}>
-                <button type="button" className="item-catalogo" onClick={() => { setEmail(u.email); setPassword(CLAVE_DEMO); setError(null); }}>
-                  <span><strong>{u.rol}</strong> · {u.email}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <section className="tarjeta" aria-label="Acceso rápido para evaluación">
+        <h2 className="tarjeta-titulo">Acceso rápido para evaluación</h2>
+        <p className="texto-suave">Elegí un perfil para entrar con su cuenta de prueba (clave <strong>{CLAVE_EVALUACION}</strong>). Cada perfil ve y puede hacer cosas distintas.</p>
+        <ul className="lista-catalogo">
+          {CUENTAS_EVALUACION.map((u) => (
+            <li key={u.email}>
+              <button type="button" className="item-catalogo" disabled={entrando} onClick={() => accesoRapido(u.email)}>
+                <span><strong>{u.rol}</strong> · {u.email}<br /><span className="texto-suave">{u.detalle}</span></span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
     </main>
   );
 }

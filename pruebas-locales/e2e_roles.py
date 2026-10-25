@@ -58,7 +58,7 @@ with sync_playwright() as p:
     r = pg.evaluate("""async () => { const s = JSON.parse(localStorage.getItem('gondola.sesion'));
       const res = await fetch('/rest/v1/rpc/gondola_restablecer_demo', { method: 'POST', headers: { apikey: 'test', Authorization: 'Bearer ' + s.accessToken, 'Content-Type': 'application/json' }, body: '{}' });
       return { status: res.status, body: await res.text() }; }""")
-    ok('R10. La base no deja al empleado restablecer la demo', r['status'] >= 400 and 'Solo el dueño' in r['body'])
+    ok('R10. La base no deja al empleado restablecer los datos', r['status'] >= 400 and ('Solo el dueño' in r['body'] or 'permission denied' in r['body']), r['body'][:90])
     pg.goto(URL + '#/catalogo'); pg.wait_for_timeout(600)
     pg.get_by_test_id('producto-catalogo').first.click()
     ok('R11. Empleado ve la ficha sin botones de edición', pg.get_by_role('button', name='Editar').count() == 0 and pg.get_by_role('button', name='Mover a otro producto').count() == 0)
@@ -86,7 +86,9 @@ with sync_playwright() as p:
     ctx, pg = nueva(); login(pg, 'duena@prueba.ar')
     ok('R17. Dueña entra al Panel', pg.get_by_role('heading', name='Estado del almacén').count() == 1 and nav(pg)[0] == 'Panel', str(nav(pg)))
     pg.goto(URL + '#/equipo'); pg.wait_for_timeout(900)
-    ok('R18. Dueña ve su equipo (3 personas, no las de otro almacén)', pg.locator('.item-equipo').count() == 3)
+    eq = pg.locator('.item-equipo').all_inner_texts()
+    ok('R18. Dueña ve su equipo (las 3 personas + las 3 cuentas de evaluación, nadie de otro almacén)',
+       len(eq) == 6 and not any('otro@prueba.ar' in t for t in eq) and all(any(e in t for t in eq) for e in ['duena@prueba.ar', 'encargado@prueba.ar', 'empleado@prueba.ar']), str(eq))
     pg.get_by_label('Rol de empleado@prueba.ar').select_option('encargado'); pg.wait_for_timeout(800)
     ok('R19. Dueña cambia un rol', sql("select rol from miembros m join auth.users u on u.id=m.user_id where u.email='empleado@prueba.ar'") == 'encargado')
     pg.get_by_label('Rol de empleado@prueba.ar').select_option('empleado'); pg.wait_for_timeout(800)

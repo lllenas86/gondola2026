@@ -6,15 +6,12 @@
   "description": "Góndola: app mobile-first para que el almacén sepa qué tiene y qué pedir cuando pasa el proveedor.",
   "scripts": {
     "dev": "vite",
-    "demo": "vite --mode demo",
-    "build:demo": "vite build --mode demo",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.5.11",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

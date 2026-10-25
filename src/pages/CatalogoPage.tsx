@@ -7,7 +7,6 @@ import { Icon } from '../components/Icon';
 import { EstadoConexion, Vacio } from '../components/ui';
 import { AltaProducto, FichaProducto } from '../features/ProductoFicha';
 import { ProveedorForm } from '../features/ProveedorForm';
-import { BotonRestablecerDemo } from '../features/RestablecerDemo';
 import type { Producto, Proveedor } from '../types';
 
 type Pestana = 'productos' | 'proveedores';
@@ -132,7 +131,6 @@ export function CatalogoPage({ pestanaInicial }: { pestanaInicial: Pestana }) {
         <p>Tus datos se guardan en la nube (Supabase). Podés usar la app desde más de un celular.</p>
       </div>
 
-      {puede('restablecerDemo') && <BotonRestablecerDemo />}
 
       {alta && <AltaProducto onCerrar={() => setAlta(false)} />}
       {ficha && <FichaProducto producto={ficha} onCerrar={() => setFicha(null)} />}

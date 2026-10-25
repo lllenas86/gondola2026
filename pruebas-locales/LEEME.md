@@ -8,7 +8,8 @@ Entorno que se usó para probar esta versión sin tocar el Supabase real (Linux)
 - `mini-postgrest.mjs` + `servidor.sh`: sirve la app compilada e imita la API REST y el login de Supabase (puerto 8787). Ejecuta cada pedido con el rol `anon` o `authenticated`, así que las políticas RLS son las reales. Los tokens de prueba no tienen firma: solo para pruebas.
 - `usuarios_prueba.sql`: usuarios de prueba (dueña, encargado, empleado y uno de otro almacén).
 - `rls_test.sql`: permisos probados directamente en SQL.
-- `e2e_smoke.py`, `e2e_flujos.py`, `e2e_migracion.py`, `e2e_roles.py`: recorridos en Chromium (Playwright) que verifican la pantalla y la base.
+- `base_final.sh [con-demo]`: base como quedará en producción (04 → datos de ejemplo → 05 → 3 cuentas de evaluación → 06).
+- `e2e_smoke.py`, `e2e_flujos.py`, `e2e_migracion.py`, `e2e_roles.py`, `e2e_recarga.py`, `e2e_evaluacion.py`, `e2e_app.mjs`: recorridos en Chromium (Playwright) que verifican la pantalla y la base.
 
 Requisitos: PostgreSQL 16 (socket en /tmp, puerto 5433), Node 18+, `npm i pg` en esta carpeta, Python con Playwright.
 Las rutas están escritas para `/home/claude/work/{app,test}`: ajustalas si lo corrés en otra máquina.

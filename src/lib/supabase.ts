@@ -16,10 +16,8 @@ function leerEnv(...nombres: string[]): string {
 }
 
 export const SUPABASE_KEY_PUBLICA = () => SUPABASE_KEY;
-// En MODO DEMO nunca se usan las variables reales: todo va a la base de prueba del navegador (src/demo/backend.ts).
-const MODO_DEMO = import.meta.env.VITE_DEMO === '1';
-export const SUPABASE_URL = MODO_DEMO ? 'https://demo.gondola.invalid' : leerEnv('NEXT_PUBLIC_SUPABASE_URL', 'VITE_SUPABASE_URL').replace(/\/+$/, '');
-const SUPABASE_KEY = MODO_DEMO ? 'demo-sin-clave' : leerEnv(
+export const SUPABASE_URL = leerEnv('NEXT_PUBLIC_SUPABASE_URL', 'VITE_SUPABASE_URL').replace(/\/+$/, '');
+const SUPABASE_KEY = leerEnv(
   'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
   'NEXT_PUBLIC_SUPABASE_ANON_KEY',
   'VITE_SUPABASE_PUBLISHABLE_KEY',

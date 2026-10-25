@@ -4,7 +4,7 @@ import type { Rol } from './auth';
 
 export type Accion =
   | 'contar' | 'recibir' | 'altaProducto' | 'editarCatalogo' | 'proveedores'
-  | 'pedidos' | 'devoluciones' | 'bajas' | 'proyeccion' | 'panel' | 'equipo' | 'restablecerDemo';
+  | 'pedidos' | 'devoluciones' | 'bajas' | 'proyeccion' | 'panel' | 'equipo';
 
 const TODOS: Rol[] = ['empleado', 'encargado', 'dueno'];
 const GESTION: Rol[] = ['encargado', 'dueno'];
@@ -22,7 +22,6 @@ const REGLAS: Record<Accion, Rol[]> = {
   proyeccion: GESTION,
   panel: ['dueno'],
   equipo: ['dueno'],
-  restablecerDemo: ['dueno'],
 };
 
 /** rol null = modo abierto (la base no tiene usuarios todavía): se permite todo, como antes. */

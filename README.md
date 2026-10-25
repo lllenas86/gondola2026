@@ -17,10 +17,13 @@ Una sola vez, en Supabase → **SQL Editor**:
 2. `supabase/02_datos_ejemplo.sql`: carga los datos de prueba y los dos remitos de ejemplo en borrador. **Borra todo lo cargado**: sirve para resetear la demo.
 3. `supabase/03_pedido_y_demo.sql`: agrega el teléfono del proveedor (para el pedido por WhatsApp) y la función `gondola_restablecer_demo()`.
 4. **`supabase/04_presentaciones_lotes_devoluciones.sql`** (obligatorio para esta versión): presentaciones, lotes, devoluciones, bajas y vistas por presentación. Conserva los datos: cada producto existente recibe una presentación «Única» 1:1 con todo su historial. Se puede volver a correr.
-5. **`supabase/05_roles_y_almacenes.sql`** (opcional, cuando quieran usuarios): login, almacenes y roles con políticas RLS. Ver los pasos en el encabezado del archivo.
+5. **`supabase/05_roles_y_almacenes.sql`**: login, almacenes y roles (Dueña, Encargado, Empleado) con políticas RLS. Desde acá la base no entrega datos sin sesión.
+6. **`supabase/06_cuentas_evaluacion.sql`**: asigna el rol a las tres cuentas de evaluación (crearlas antes en Authentication → Users) y las protege para que no se modifiquen desde la app.
+
+Si después de la 05 nadie puede entrar: `supabase/mantenimiento/recuperar_acceso_sin_login.sql` vuelve al acceso sin login sin borrar datos (para reactivar el login, ver el final del archivo).
 
 Detalle de los cambios, pasos de migración y pruebas: [`MEJORAS_2026-10.md`](MEJORAS_2026-10.md).
-Después de la 04, la demo se restablece con el botón **Restablecer demo** (02 queda para instalaciones nuevas, antes de la 04).
+Los datos de ejemplo se recargan solo desde el SQL Editor con `select gondola_restablecer_demo();` (borra lo cargado). La app no tiene botón de reinicio.
 
 ## Variables de entorno (Vercel → Settings → Environment Variables)
 
@@ -37,6 +40,8 @@ El proyecto es Vite, pero `vite.config.ts` acepta también las variables `NEXT_P
 Si no hay conexión con la base, la app lo avisa ("Sin conexión con la base: los cambios no se guardan") y no muestra datos inventados. El punto del encabezado indica la conexión: verde = conectado, gris = sin conexión.
 
 ## Cómo probarla
+
+En la pantalla de ingreso, **Acceso rápido para evaluación** entra con un toque como Dueña, Encargado o Empleado (cuentas reales de Supabase Auth, clave `demo1234`). Cada perfil ve su propio menú y la base aplica sus permisos.
 
 **Con Node 18 o superior:**
 
@@ -102,12 +107,12 @@ El pedido no se guarda: se registra cuando llega la mercadería, en Recepción.
 5. Solo "Confirmar recepción" suma al stock. La base no deja confirmar con líneas sin vincular.
 6. Si la imagen es ilegible o el modelo falla: aviso y botón "Cargar a mano".
 
-**Modo demo.** "Usar remito de ejemplo" abre los remitos en borrador de la demo (Lácteos del Sur y Distribuidora Centro):
+**Remitos de ejemplo (para evaluación).** "Usar remito de ejemplo" abre los remitos en borrador de los datos de ejemplo (Lácteos del Sur y Distribuidora Centro):
 
 - Lácteos del Sur: el yogur figura 12 en el remito pero la IA "leyó" 18 con confianza baja (amarillo), y el queso crema no está en el catálogo.
 - Distribuidora Centro: trae Coca-Cola en **2,25 L y 500 cc** (dos presentaciones del mismo producto), el agua tiene lectura dudosa y la Fanta no está en el catálogo.
 
-Una vez confirmados dejan de ser borradores; para repetir la demo, **Restablecer demo**.
+Una vez confirmados dejan de ser borradores; para repetirlos hay que recargar los datos de ejemplo desde el SQL Editor.
 
 Las imágenes también están en `docs/remitos-ejemplo/` para probar el camino de la foto.
 
@@ -154,7 +159,7 @@ pruebas-locales/              entorno usado para probar de punta a punta (Postgr
 
 ## Datos de prueba
 
-La demo (botón **Restablecer demo**) trae: Coca-Cola en **2,25 L y 500 ml**, Sprite 2,25 L, Agua 1,5 L (Distribuidora Centro, martes y viernes); Leche entera 1 L y Yogur bebible en **1 L y 190 g** (Lácteos del Sur, lunes, miércoles y viernes); Yerba mate **1 kg y 500 g** (Mayorista Rosario, jueves). Hay lotes con vencimientos distintos, 3 yogures vencidos todavía en stock, una devolución resuelta, una baja, un remito de ejemplo con dos presentaciones de Coca-Cola y una presentación sin costo (para mostrar «valor no calculable»).
+Los datos de ejemplo (`gondola_restablecer_demo()`) traen: Coca-Cola en **2,25 L y 500 ml**, Sprite 2,25 L, Agua 1,5 L (Distribuidora Centro, martes y viernes); Leche entera 1 L y Yogur bebible en **1 L y 190 g** (Lácteos del Sur, lunes, miércoles y viernes); Yerba mate **1 kg y 500 g** (Mayorista Rosario, jueves). Hay lotes con vencimientos distintos, 3 yogures vencidos todavía en stock, una devolución resuelta, una baja, un remito de ejemplo con dos presentaciones de Coca-Cola y una presentación sin costo (para mostrar «valor no calculable»).
 
 ## Limitaciones conocidas
 

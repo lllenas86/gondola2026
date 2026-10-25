@@ -525,13 +525,6 @@ export async function registrarBajas(bajas: NuevaBaja[]): Promise<void> {
   );
 }
 
-// ---------- Demo ----------
-
-/** Vuelve la base a los datos de ejemplo (función de supabase/04_….sql). */
-export async function restablecerDemo(): Promise<void> {
-  await db.rpc('gondola_restablecer_demo');
-}
-
 // ---------- Equipo (requiere supabase/05) ----------
 
 export interface Miembro {
