@@ -115,3 +115,21 @@ Pruebas re-ejecutadas el 25/10 sobre esta versión (Postgres 16 local + API simu
 - Orden en producción: crear las 3 cuentas → respaldo → 05 + 06 → publicar esta versión (la 05 corta el acceso sin login de la versión publicada anterior).
 
 Pruebas sobre esta versión (Postgres 16 local + API simulada con RLS real): typecheck y build OK · `npm test` 15/15 · `e2e_app.mjs` 27/27 · `e2e_evaluacion.py` 25/25 (acceso rápido, permisos por rol verificados en la base, cuentas protegidas, reinicio bloqueado, recargas, dos pestañas) · `e2e_roles.py` 22/22 · `e2e_migracion.py` 16/16 · `e2e_flujos.py` 32/32 · `e2e_recarga.py` 4/4 · 05+06 conservan datos y stock idénticos (checksum) y son re-ejecutables. Se retiraron `e2e_demo.mjs` y `e2e_demo_login.py` (probaban el modo demo eliminado).
+
+## 9. Corrección de lectura de remitos · 26/10/2026 (rama `correccion-remitos-ia`)
+
+**Reconocimiento de productos y presentaciones** (`src/lib/match.ts`, `RevisionRecepcion.tsx`)
+- Unidades normalizadas: 200 gr = 200 g = 200 gramos = 200grs = 0,2 kg; 500 cc = 500 ml = 0,5 l; 1 kilo = 1000 g.
+- El producto se identifica por sus palabras sin tamaño; si remito y ficha tienen cada uno palabras que el otro no tiene (otra marca o variedad), no se asocian nunca por parecido.
+- La presentación se elige por tamaño normalizado. Tamaño que la ficha no tiene → no se asigna otra presentación: se ofrece «Agregar 500 g a «Manteca Pepito»». Varios posibles → se muestran las opciones y hay que elegir.
+- «Crear» propone el nombre sin el tamaño y no deja crear una ficha que ya existe escrita distinto («Manteca Pepito 200 gr» = «Manteca Pepito»).
+- Una línea marcada para revisar no se confirma hasta que la persona la confirma o la corrige; si la IA no lee la fecha, el campo queda vacío y se avisa.
+
+**Servicio `api/leer-remito.js`**
+- Gemini 2.5 Flash tenía el «razonamiento» activo por defecto: 40-60 s por remito. Se desactiva (thinkingBudget 0).
+- Tiempo máximo por intento (25 s), hasta 3 intentos solo ante errores transitorios (429, 5xx, red, demora) con espera progresiva y variación aleatoria, y presupuesto total de 50 s (Vercel corta a los 60 s). Errores de configuración no se reintentan.
+- Respaldo en el mismo proveedor y la misma clave: `gemini-2.5-flash-lite` (variable `VISION_MODEL_RESPALDO`; «no» lo desactiva).
+- Valida formato real y tamaño de la imagen; la misma foto enviada dos veces a la vez se lee una sola vez; registra en los logs modelo, intentos y duración (sin la clave ni la imagen).
+- Respuestas: 503 «servicio saturado» o 504 «tardó demasiado», con `reintentable`; la app ofrece «Reintentar la lectura» (un pedido por vez) o «Cargar a mano».
+
+Pruebas: `npm test` 41/41 (17 de reconocimiento, 9 del servicio con Gemini simulado: 503, reintentos, presupuesto, colgado, duplicados, imagen inválida) · `e2e_manteca.py` 19/19 · `e2e_remitos.py` 34/34 · `e2e_flujos.py` 32/32 · `e2e_migracion.py` 16/16 · `e2e_app.mjs` 27/27 · `e2e_evaluacion.py` 25/25 · `e2e_roles.py` 22/22 · `e2e_recarga.py` 4/4.

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useStore } from '../state/store';
+import { medidaDe, mismaIdentidad } from '../lib/match';
 import { leerNumero, validarPresentacion, validarProducto, type EntradaPresentacion, type Errores } from '../lib/validation';
 import { guardarPresentacion, guardarProducto, moverPresentacion } from '../lib/datos';
 import {
@@ -163,8 +164,15 @@ export function AltaProducto({ nombreInicial = '', presentacionInicial = '', pro
     if (guardando) return;
     const err: Errores = modo === 'nuevo' ? validarProducto({ nombre }) : productoId ? {} : { producto: 'Elegí el producto.' };
     const errP = validarPresentacion(pres);
-    if (modo === 'nuevo' && !err.nombre && data.productos.some((p) => p.nombre.trim().toLowerCase() === nombre.trim().toLowerCase())) {
-      err.nombre = 'Ya existe un producto con ese nombre. Elegí «Agregar a un producto existente».';
+    // Mismo producto escrito de otra forma ("Manteca Pepito 200 gr" = "Manteca Pepito"): no se crea otra ficha.
+    // Se permite crear «Coca-Cola» si la existente es una ficha vieja con el tamaño en el nombre («Coca-Cola 2,25 L»),
+    // porque así se ordenan esas fichas (después se usa «Mover a otro producto»).
+    const igual = modo === 'nuevo' && !err.nombre
+      ? data.productos.find((p) => p.activo && (p.nombre.trim().toLowerCase() === nombre.trim().toLowerCase()
+          || (mismaIdentidad(p.nombre, nombre) && medidaDe(p.nombre) === null)))
+      : undefined;
+    if (igual) {
+      err.nombre = `Ya existe «${igual.nombre}». Elegí «Agregar a uno existente» para sumarle esta presentación.`;
     }
     if (modo === 'existente' && productoId && !errP.nombre && presentacionesDe(data, productoId).some((x) => x.nombre.trim().toLowerCase() === pres.nombre.trim().toLowerCase())) {
       errP.nombre = 'Ese producto ya tiene una presentación con ese nombre.';

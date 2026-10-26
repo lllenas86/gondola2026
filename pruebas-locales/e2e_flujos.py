@@ -183,7 +183,10 @@ with sync_playwright() as p:
     sel = lambda t: lineas.filter(has_text=t).locator('select').first.evaluate('s => s.options[s.selectedIndex].text')
     ok('10a. Reconoce 2,25 L y 500 cc como presentaciones distintas', sel('COCA COLA 2,25 LT') == 'Coca-Cola 2,25 L' and sel('COCA COLA 500 CC') == 'Coca-Cola 500 ml', f"{sel('COCA COLA 2,25 LT')} / {sel('COCA COLA 500 CC')}")
     lineas.filter(has_text='FANTA').get_by_role('button', name='Ignorar').click()
-    lineas.filter(has_text='AGUA MIN').get_by_role('button', name='Está bien').click()
+    linea_de = lambda t: lineas.filter(has=pg.locator('.linea-remito', has_text=t))
+    linea_de('AGUA MIN').get_by_role('button', name='Está bien').click()
+    # «LIMA-LIMON» no está en la ficha «Sprite»: desde la corrección del 26/10 se pide confirmarlo una vez
+    linea_de('SPRITE').get_by_role('button', name='Está bien').click()
     pg.get_by_role('button', name='Confirmar recepción').click()
     toast('Recepción guardada')
     ok('10b. Suma a cada presentación por separado',
