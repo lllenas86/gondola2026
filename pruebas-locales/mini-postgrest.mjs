@@ -128,7 +128,7 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   let raw = '';
   for await (const ch of req) raw += ch;
-  const body = raw ? JSON.parse(raw) : null;
+  let body = null; try { body = raw ? JSON.parse(raw) : null; } catch { body = null; }
   reqActual = req;
   try {
     if (url.pathname === '/auth/v1/token') {

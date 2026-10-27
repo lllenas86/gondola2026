@@ -289,6 +289,9 @@ img { max-width: 100%; display: block; }
 .linea-remito { font-size: 14px; color: #334155; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
 .linea-aviso { font-size: 14px; font-weight: 650; color: #713f12; margin-bottom: 10px; }
 .linea-acciones { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin: -6px 0 14px; }
+.linea-acciones:has(> :nth-child(3)) { grid-template-columns: 1fr; }
+.linea-opciones { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 12px; }
+.linea-opciones .btn { flex: 1 1 auto; }
 .linea-pie { display: flex; justify-content: space-between; gap: 8px; min-height: 8px; }
 .linea .contador { min-height: 50px; }
 .linea .contador-input { min-height: 48px !important; font-size: 20px !important; }

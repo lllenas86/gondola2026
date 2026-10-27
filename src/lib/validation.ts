@@ -71,6 +71,12 @@ export interface LineaBorrador {
   confianza?: number;
   revisar: boolean;
   ignorada: boolean;
+  /** Coincidencia ambigua: presentaciones posibles para elegir */
+  opciones?: string[];
+  /** El producto existe pero no con el tamaño del remito */
+  productoSugeridoId?: string;
+  /** Tamaño leído en el remito ("200 g") */
+  medida?: string;
 }
 
 export interface ResultadoRecepcion {
@@ -83,6 +89,7 @@ export function validarRecepcion(proveedorId: string, fecha: string, lineas: Lin
   const errores: Record<string, string> = {};
   const validas: LineaRecepcion[] = [];
   let sinProducto = 0;
+  let porConfirmar = 0;
 
   if (!proveedorId) errores.proveedor = 'Elegí el proveedor.';
   if (!fecha) errores.fecha = 'Indicá la fecha.';
@@ -98,6 +105,10 @@ export function validarRecepcion(proveedorId: string, fecha: string, lineas: Lin
     if (n === null || n === 'invalido' || n <= 0) {
       errores[`${l.key}.cantidad`] = 'La cantidad tiene que ser mayor a 0.';
     }
+    if (l.presentacionId && l.revisar) {
+      porConfirmar++;
+      errores[`${l.key}.producto`] = 'Confirmá esta línea: tocá «Está bien» o corregila.';
+    }
     if (l.presentacionId && typeof n === 'number' && n > 0) {
       validas.push({ presentacionId: l.presentacionId, cantidad: n, fechaVencimiento: l.fechaVencimiento || undefined });
     }
@@ -108,6 +119,10 @@ export function validarRecepcion(proveedorId: string, fecha: string, lineas: Lin
     errorGeneral = sinProducto === 1
       ? 'Hay 1 línea sin producto asignado: vinculala, creá el producto o ignorala.'
       : `Hay ${sinProducto} líneas sin producto asignado: vinculalas, creá los productos o ignoralas.`;
+  } else if (porConfirmar > 0) {
+    errorGeneral = porConfirmar === 1
+      ? 'Hay 1 línea marcada para revisar: confirmala o corregila antes de guardar.'
+      : `Hay ${porConfirmar} líneas marcadas para revisar: confirmalas o corregilas antes de guardar.`;
   } else if (lineas.filter((l) => !l.ignorada).length === 0) {
     errorGeneral = 'La recepción no tiene ninguna línea para cargar.';
   } else if (Object.keys(errores).length > 0) {

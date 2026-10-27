@@ -17,7 +17,7 @@ import type { Borrador, LineaBorradorBase, Recepcion } from '../types';
 type Paso =
   | { tipo: 'inicio' }
   | { tipo: 'leyendo'; imagen: string }
-  | { tipo: 'error'; imagen: string; imagenPath: string | null; mensaje: string }
+  | { tipo: 'error'; imagen: string; imagenPath: string | null; mensaje: string; reintentable?: boolean }
   | {
       tipo: 'revision';
       origen: 'manual' | 'remito_foto';
@@ -48,6 +48,7 @@ export function RecepcionPage() {
   const [detalle, setDetalle] = useState<Recepcion | null>(null);
   const [abriendo, setAbriendo] = useState<string | null>(null);
   const camara = useRef<HTMLInputElement>(null);
+  const leyendo = useRef(false);
   const galeria = useRef<HTMLInputElement>(null);
 
   const alElegirFoto = async (archivo: File | undefined) => {
@@ -60,11 +61,29 @@ export function RecepcionPage() {
       avisar('No se pudo abrir el archivo. Elegí una foto (JPG o PNG).', 'error');
       return;
     }
+    await leer(imagen);
+  };
+
+  /**
+   * Manda la foto a la IA. Al reintentar se reusa la foto ya subida (imagenPathPrevio).
+   * Un pedido por vez: un segundo toque mientras lee no genera otra lectura.
+   */
+  const leer = async (imagen: string, imagenPathPrevio?: string | null) => {
+    if (leyendo.current) return;
+    leyendo.current = true;
+    try {
+      await leerUnaVez(imagen, imagenPathPrevio);
+    } finally {
+      leyendo.current = false;
+    }
+  };
+
+  const leerUnaVez = async (imagen: string, imagenPathPrevio?: string | null) => {
     setPaso({ tipo: 'leyendo', imagen });
 
     // Se guarda la foto en el bucket (si existe) mientras la IA la lee.
     const [subida, lectura] = await Promise.allSettled([
-      subirFotoRemito(dataUrlABlob(imagen), nuevoId()),
+      imagenPathPrevio !== undefined ? Promise.resolve(imagenPathPrevio) : subirFotoRemito(dataUrlABlob(imagen), nuevoId()),
       // Se mandan los nombres con el tamaño, para que la IA distinga presentaciones
       leerRemito(imagen, itemsActivos(data).map((it) => {
         const n = nombreItem(it.producto, it.presentacion);
@@ -76,7 +95,11 @@ export function RecepcionPage() {
 
     if (lectura.status === 'rejected') {
       const e = lectura.reason;
-      setPaso({ tipo: 'error', imagen, imagenPath, mensaje: e instanceof ErrorLectura ? e.message : 'No se pudo leer el remito.' });
+      setPaso({
+        tipo: 'error', imagen, imagenPath,
+        mensaje: e instanceof ErrorLectura ? e.message : 'No se pudo leer el remito.',
+        reintentable: e instanceof ErrorLectura && e.reintentable,
+      });
       return;
     }
     const { extraccion, crudo } = lectura.value;
@@ -208,7 +231,12 @@ export function RecepcionPage() {
           </div>
           {paso.tipo === 'error' && (
             <div className="acciones-columna">
-              <button type="button" className="btn btn-primario btn-bloque" onClick={() => setPaso({ tipo: 'revision', origen: 'manual', imagenUrl: paso.imagen, imagenPath: paso.imagenPath })}>
+              {paso.reintentable && (
+                <button type="button" className="btn btn-primario btn-bloque" onClick={() => void leer(paso.imagen, paso.imagenPath)}>
+                  <Icon name="reloj" /> Reintentar la lectura
+                </button>
+              )}
+              <button type="button" className={`btn ${paso.reintentable ? 'btn-secundario' : 'btn-primario'} btn-bloque`} onClick={() => setPaso({ tipo: 'revision', origen: 'manual', imagenUrl: paso.imagen, imagenPath: paso.imagenPath })}>
                 <Icon name="lapiz" /> Cargar a mano
               </button>
               <button type="button" className="btn btn-secundario btn-bloque" onClick={() => setPaso({ tipo: 'inicio' })}>

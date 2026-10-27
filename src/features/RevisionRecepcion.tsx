@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
-import { CONFIANZA_ALTA, medidaDe, vincularLinea, vincularProveedor } from '../lib/match';
+import { CONFIANZA_ALTA, medidaDe, medidaLegible, sinMedida, vincularLinea, vincularProveedor, type Vinculo } from '../lib/match';
 import { leerNumero, validarRecepcion, type LineaBorrador } from '../lib/validation';
 import { itemDe, itemsActivos, itemsDeProveedor, nombreItem, stockDe, type Item } from '../lib/inventario';
 import { confirmarRecepcion, type LineaAConfirmar } from '../lib/datos';
@@ -41,8 +41,8 @@ function armarBorrador(data: AppData, borrador: Borrador | undefined) {
   const items = itemsActivos(data);
   const lineas: LineaBorrador[] = borrador.lineas.map((l) => {
     // Si la línea no quedó vinculada, se intenta de nuevo con el catálogo actual (y los alias aprendidos)
-    const v = l.presentacionId
-      ? { presentacionId: l.presentacionId, confianza: l.confianzaVinculo ?? 1, motivo: l.motivoRevision }
+    const v: Vinculo = l.presentacionId
+      ? { presentacionId: l.presentacionId, confianza: l.confianzaVinculo ?? 1, ...(l.motivoRevision ? { motivo: l.motivoRevision } : {}) }
       : vincularLinea(l.descripcion, items, ids, data.alias);
     const confianza = Math.min(v.confianza, l.confianza ?? 1);
     return {
@@ -55,13 +55,17 @@ function armarBorrador(data: AppData, borrador: Borrador | undefined) {
       ...(v.motivo ? { motivoRevision: v.motivo } : {}),
       revisar: !v.presentacionId || confianza < CONFIANZA_ALTA,
       ignorada: false,
+      ...(v.opciones ? { opciones: v.opciones } : {}),
+      ...(v.productoSugeridoId ? { productoSugeridoId: v.productoSugeridoId } : {}),
+      ...(v.medida ? { medida: v.medida } : {}),
     };
   });
-  return { proveedorId, fecha: borrador.fecha || isoDate(new Date()), lineas: lineas.length > 0 ? lineas : [lineaVacia()] };
+  return { proveedorId, fecha: borrador.fecha || '', lineas: lineas.length > 0 ? lineas : [lineaVacia()] };
 }
 
 function tituloDesdeRemito(desc: string): string {
-  const t = desc.toLowerCase().replace(/\s+/g, ' ').trim();
+  // El nombre del producto va sin el tamaño (el tamaño es la presentación)
+  const t = sinMedida(desc).toLowerCase().replace(/\s+/g, ' ').trim();
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
@@ -74,7 +78,8 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
   const [lineas, setLineas] = useState<LineaBorrador[]>(inicial.lineas);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
-  const [creandoPara, setCreandoPara] = useState<LineaBorrador | null>(null);
+  /** Alta desde una línea: producto nuevo, o presentación nueva en una ficha existente */
+  const [creandoPara, setCreandoPara] = useState<{ linea: LineaBorrador; productoId?: string } | null>(null);
   /** Líneas cargadas en bultos (solo presentaciones con equivalencia configurada) */
   const [enBultos, setEnBultos] = useState<Record<string, boolean>>({});
   /** Vinculación inicial de cada línea, para saber cuáles se corrigieron a mano */
@@ -208,6 +213,12 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
         )}
 
         <div className="revision-datos">
+          {!fecha && origen === 'remito_foto' && (
+            <div className="alerta-amarilla">
+              <Icon name="alerta" size={20} />
+              <span>No se pudo leer la fecha del remito: completala antes de confirmar.</span>
+            </div>
+          )}
           {(aRevisar > 0 || pendientes > 0) && (
             <div className="alerta-amarilla">
               <Icon name="alerta" size={20} />
@@ -256,7 +267,7 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
                   {l.revisar && (
                     <p className="linea-aviso">
                       {!l.presentacionId
-                        ? 'No encontramos esta presentación en el catálogo. Elegila, creala o ignorá la línea.'
+                        ? l.motivoRevision ?? 'No encontramos este producto en el catálogo. Elegilo, crealo o ignorá la línea.'
                         : l.motivoRevision
                           ? `${l.motivoRevision} Confirmá la presentación.`
                           : `Revisá presentación y cantidad: la IA no está segura (confianza ${Math.round((l.confianza ?? 0) * 100)} %).`}
@@ -279,11 +290,29 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
                     </select>
                   </Campo>
 
+                  {!l.presentacionId && (l.opciones?.length ?? 0) > 0 && (
+                    <div className="linea-opciones" role="group" aria-label="Presentaciones posibles">
+                      {l.opciones!.map((id) => {
+                        const op = itemDe(data, id);
+                        return op ? (
+                          <button key={id} type="button" className="btn btn-secundario" data-testid="opcion-presentacion" onClick={() => cambiarLinea(l.key, { presentacionId: id, motivoRevision: undefined })}>
+                            {nombreItem(op.producto, op.presentacion)}
+                          </button>
+                        ) : null;
+                      })}
+                    </div>
+                  )}
+
                   {!l.presentacionId && (
                     <div className="linea-acciones">
+                      {puede('altaProducto') && l.productoSugeridoId && (
+                        <button type="button" className="btn btn-secundario" data-testid="agregar-presentacion" onClick={() => setCreandoPara({ linea: l, productoId: l.productoSugeridoId })}>
+                          <Icon name="mas" size={18} /> Agregar {l.medida ? medidaLegible(l.medida) : 'presentación'} a «{data.productos.find((p) => p.id === l.productoSugeridoId)?.nombre}»
+                        </button>
+                      )}
                       {puede('altaProducto') && (
-                        <button type="button" className="btn btn-secundario" onClick={() => setCreandoPara(l)}>
-                          <Icon name="mas" size={18} /> Crear
+                        <button type="button" className="btn btn-secundario" onClick={() => setCreandoPara({ linea: l })}>
+                          <Icon name="mas" size={18} /> {l.productoSugeridoId ? 'Producto nuevo' : 'Crear'}
                         </button>
                       )}
                       <button type="button" className="btn btn-fantasma" onClick={() => cambiarLinea(l.key, { ignorada: true }, false)}>
@@ -358,11 +387,12 @@ export function RevisionRecepcion({ origen, imagenUrl, imagenPath, borrador, onC
 
       {creandoPara && (
         <AltaProducto
-          nombreInicial={tituloDesdeRemito(creandoPara.descripcion)}
-          presentacionInicial={medidaDe(creandoPara.descripcion)?.replace('_', ',') ?? ''}
+          nombreInicial={tituloDesdeRemito(creandoPara.linea.descripcion)}
+          presentacionInicial={medidaDe(creandoPara.linea.descripcion)?.replace('_', ',') ?? ''}
           proveedorIdsIniciales={proveedorId ? [proveedorId] : []}
+          {...(creandoPara.productoId ? { productoExistenteId: creandoPara.productoId } : {})}
           onCerrar={() => setCreandoPara(null)}
-          onGuardado={(x) => cambiarLinea(creandoPara.key, { presentacionId: x.id })}
+          onGuardado={(x) => cambiarLinea(creandoPara.linea.key, { presentacionId: x.id, motivoRevision: undefined, productoSugeridoId: undefined, opciones: undefined })}
         />
       )}
 
