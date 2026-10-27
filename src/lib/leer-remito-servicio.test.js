@@ -19,13 +19,13 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('reintentos y tiempos', () => {
-  const base = { proveedor: 'gemini', clave: 'k', modelos: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'], mime: 'image/jpeg', base64: 'x', prompt: 'p' };
+  const base = { proveedor: 'gemini', clave: 'k', modelos: ['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'], mime: 'image/jpeg', base64: 'x', prompt: 'p' };
 
   it('503 transitorio: reintenta con el modelo de respaldo y lee', async () => {
     const llamar = vi.fn().mockRejectedValueOnce(new ErrorModelo('gemini', 503, 'overloaded')).mockResolvedValueOnce(OK);
     const r = await leerConReintentos(base, llamar);
     expect(r.texto).toBe(OK);
-    expect(llamar.mock.calls.map((c) => c[2])).toEqual(['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
+    expect(llamar.mock.calls.map((c) => c[2])).toEqual(['gemini-2.5-flash', 'gemini-3.5-flash-lite']);
   });
   it('503 siempre: corta en 3 intentos y avisa «no disponible», dentro del presupuesto', async () => {
     const llamar = vi.fn().mockRejectedValue(new ErrorModelo('gemini', 503, 'overloaded'));
@@ -41,6 +41,21 @@ describe('reintentos y tiempos', () => {
     const total = Date.now() - t0;
     expect(total).toBeLessThan(1500);
     expect(llamar.mock.calls.length).toBeLessThanOrEqual(3);
+  });
+  it('respaldo no disponible (404, caso real del 27/10): se sigue con el modelo principal', async () => {
+    const llamar = vi.fn()
+      .mockRejectedValueOnce(new ErrorModelo('gemini', 503, 'overloaded'))
+      .mockRejectedValueOnce(new ErrorModelo('gemini', 404, 'model no longer available'))
+      .mockResolvedValueOnce(OK);
+    const r = await leerConReintentos(base, llamar);
+    expect(r.texto).toBe(OK);
+    expect(llamar.mock.calls.map((c) => c[2])).toEqual(['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash']);
+  });
+  it('si el modelo no acepta el ajuste de razonamiento (400), reintenta sin él', async () => {
+    const llamar = vi.fn().mockRejectedValueOnce(new ErrorModelo('gemini', 400, 'Invalid JSON payload: unknown field thinkingLevel')).mockResolvedValueOnce(OK);
+    const r = await leerConReintentos(base, llamar);
+    expect(r.texto).toBe(OK);
+    expect(llamar.mock.calls[1][7]).toEqual({ sinAjusteRazonamiento: true });
   });
   it('error de configuración (401/404) no se reintenta', async () => {
     const llamar = vi.fn().mockRejectedValue(new ErrorModelo('gemini', 404, 'model not found'));
@@ -60,7 +75,16 @@ describe('función /api/leer-remito (Gemini simulado)', () => {
     const cuerpo = JSON.parse(f.mock.calls[0][1].body);
     expect(cuerpo.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
     expect(f.mock.calls[0][0]).toContain('gemini-2.5-flash:');
-    expect(f.mock.calls[1][0]).toContain('gemini-2.5-flash-lite:');
+    expect(f.mock.calls[1][0]).toContain('gemini-3.5-flash-lite:');
+  });
+  it('Gemini 3 (modelo configurado en Vercel): pide razonamiento «low»', async () => {
+    process.env.VISION_MODEL = 'gemini-3.8-flash';
+    const f = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(geminiOk());
+    const res = respuesta();
+    await handler({ method: 'POST', body: { imagen: JPEG, productos: ['y'] } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(f.mock.calls[0][0]).toContain('gemini-3.8-flash:');
+    expect(JSON.parse(f.mock.calls[0][1].body).generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' });
   });
   it('servicio caído → 503 con mensaje útil, Retry-After y sin lectura inventada', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => gemini503());

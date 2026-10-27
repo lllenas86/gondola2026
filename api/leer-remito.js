@@ -9,7 +9,7 @@
 //   VISION_PROVIDER        "gemini", "anthropic" u "openai" (opcional: se deduce de la clave)
 //   VISION_MODEL           modelo a usar (opcional)
 //   VISION_MODEL_RESPALDO  modelo de respaldo del MISMO proveedor y la misma clave (opcional;
-//                          en Gemini, por defecto gemini-2.5-flash-lite; "no" lo desactiva)
+//                          en Gemini, por defecto gemini-3.5-flash-lite; "no" lo desactiva)
 //
 // Robustez (la función tiene 60 s en Vercel, ver vercel.json):
 //   - cada intento tiene un tiempo máximo explícito (AbortController);
@@ -26,7 +26,7 @@ const MODELOS = {
   anthropic: 'claude-sonnet-5-5',
   openai: 'gpt-4o-mini',
 };
-const RESPALDO = { gemini: 'gemini-2.5-flash-lite' };
+const RESPALDO = { gemini: 'gemini-3.5-flash-lite' };
 
 const MAX_BASE64 = 2_100_000; // ≈ 1,5 MB de imagen
 const MIN_BASE64 = 1_000; // menos de ~750 bytes no es una foto
@@ -76,7 +76,7 @@ Productos del catálogo del almacén (solo para ayudarte a interpretar abreviatu
 ${lista}`;
 }
 
-async function llamarModelo(proveedor, clave, modelo, mime, base64, prompt, signal) {
+async function llamarModelo(proveedor, clave, modelo, mime, base64, prompt, signal, opciones = {}) {
   if (proveedor === 'anthropic') {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -124,9 +124,12 @@ async function llamarModelo(proveedor, clave, modelo, mime, base64, prompt, sign
   }
 
   // Gemini
-  // En Gemini 2.5 Flash el "razonamiento" está activo por defecto y multiplica la demora
-  // (40-60 s por remito): para leer un remito no hace falta, se desactiva.
-  const sinRazonar = /^gemini-2\.5-flash/.test(modelo) ? { thinkingConfig: { thinkingBudget: 0 } } : {};
+  // El "razonamiento" de Gemini viene activo por defecto (en Gemini 3, nivel "high") y multiplica
+  // la demora (25-60 s por remito). Para leer un remito alcanza con poco: se baja al mínimo.
+  const sinRazonar = opciones.sinAjusteRazonamiento ? {}
+    : /^gemini-2\.5-flash/.test(modelo) ? { thinkingConfig: { thinkingBudget: 0 } }
+      : /^gemini-[3-9]/.test(modelo) ? { thinkingConfig: { thinkingLevel: 'low' } }
+        : {};
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`, {
     method: 'POST',
     signal,
@@ -197,23 +200,38 @@ export async function leerConReintentos({ proveedor, clave, modelos, mime, base6
   const inicio = Date.now();
   const intentos = [];
   let ultimo = null;
+  let lista = [...modelos];
+  const opciones = {};
   for (let n = 0; n < t.intentos; n++) {
     const restante = t.presupuesto - (Date.now() - inicio);
     if (restante < t.minimoIntento) break;
-    const modelo = modelos[Math.min(n, modelos.length - 1)];
+    const modelo = lista[Math.min(n, lista.length - 1)];
     const limite = Math.min(t.porIntento, restante);
     const control = new AbortController();
     const reloj = setTimeout(() => control.abort(), limite);
     const t0 = Date.now();
     try {
-      const texto = await llamar(proveedor, clave, modelo, mime, base64, prompt, control.signal);
+      const texto = await llamar(proveedor, clave, modelo, mime, base64, prompt, control.signal, opciones);
       intentos.push({ modelo, ms: Date.now() - t0, status: 200 });
       return { texto, intentos };
     } catch (e) {
       const status = e instanceof ErrorModelo ? e.status : control.signal.aborted ? 'demora' : 'red';
       intentos.push({ modelo, ms: Date.now() - t0, status });
       ultimo = e;
-      if (!esTransitorio(e)) throw { tipo: 'config', intentos, causa: e };
+      if (!esTransitorio(e)) {
+        const msj = String(e?.message ?? '');
+        if (e.status === 400 && /thinking/i.test(msj) && !opciones.sinAjusteRazonamiento) {
+          // El modelo no acepta el ajuste de razonamiento: se reintenta sin él (sin espera)
+          opciones.sinAjusteRazonamiento = true;
+          continue;
+        }
+        if (modelo !== modelos[0]) {
+          // El modelo de RESPALDO no está disponible (p. ej. 404): se sigue solo con el principal
+          lista = lista.map((x) => (x === modelo ? modelos[0] : x));
+          continue;
+        }
+        throw { tipo: 'config', intentos, causa: e };
+      }
     } finally {
       clearTimeout(reloj);
     }
