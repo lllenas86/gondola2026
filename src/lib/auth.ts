@@ -66,6 +66,25 @@ export function sesionActual(): Sesion | null {
   return actual;
 }
 
+/**
+ * Varias pestañas comparten la sesión (localStorage) pero cada una la tiene en memoria.
+ * Si en otra pestaña se cierra sesión o se entra con otro usuario, esta pestaña se recarga
+ * para no seguir mostrando un usuario con credenciales de otro ("Falta tu almacén",
+ * "Sin conexión"). Si es el mismo usuario con el token renovado, solo toma el token nuevo.
+ */
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== CLAVE && e.key !== null) return;
+    const nueva = leerGuardada();
+    if (nueva && actual && nueva.usuario.id === actual.usuario.id) {
+      actual = nueva;
+      usarToken(nueva.accessToken);
+      return;
+    }
+    if ((nueva?.usuario.id ?? null) !== (actual?.usuario.id ?? null)) window.location.reload();
+  });
+}
+
 interface RespuestaToken {
   access_token: string;
   refresh_token: string;
